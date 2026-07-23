@@ -1,0 +1,9 @@
+{
+  "contract_version": "1.0",
+  "level": 0,
+  "blocked": false,
+  "matched_terms": [],
+  "meta": {
+    "implementation": "mock"
+  }
+}

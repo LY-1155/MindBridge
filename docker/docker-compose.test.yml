@@ -1,0 +1,19 @@
+services:
+  therapy-agent:
+    build:
+      context: ..
+      dockerfile: tests/Dockerfile.mock
+    expose:
+      - "8000"
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/ssl:/etc/nginx/ssl:ro
+      - ../nginx/static:/etc/nginx/static:ro
+    depends_on:
+      - therapy-agent

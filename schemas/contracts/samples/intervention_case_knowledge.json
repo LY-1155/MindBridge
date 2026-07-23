@@ -1,0 +1,28 @@
+{
+  "contract_version": "1.0",
+  "user_text": "失眠一个月了，我想了解中国失眠诊疗指南里对认知行为疗法是怎么说的。",
+  "session_id": "test-intervention-knowledge-001",
+  "route": {
+    "contract_version": "1.0",
+    "route": "knowledge",
+    "reason": "risk_in_mid_band_stub",
+    "confidence": 0.81
+  },
+  "emotion": {
+    "contract_version": "1.0",
+    "primary_emotion": "sad",
+    "intensity": 0.72,
+    "risk": 0.48,
+    "modality_notes": {
+      "source": "test_fixture",
+      "note": "risk 约在 0.3~0.7 时常被 Stub 路由打到 knowledge"
+    }
+  },
+  "safety": {
+    "contract_version": "1.0",
+    "level": 0,
+    "blocked": false,
+    "matched_terms": [],
+    "meta": {}
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "contract_version": "1.3",
+  "route": "knowledge",
+  "reason": "mid_risk:confusion_bias | confidence=0.95",
+  "confidence": 0.95,
+  "meta": {
+    "risk_level": "mid",
+    "safety_escalated": false,
+    "emotion_bias": "confusion→knowledge",
+    "emotion_bias_applied": true,
+    "boundary_distance": 0.15,
+    "mixed_signals": false,
+    "llm_fallback_triggered": false,
+    "llm_agreement": null
+  }
+}

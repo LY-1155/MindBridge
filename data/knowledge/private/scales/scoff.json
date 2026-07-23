@@ -1,0 +1,63 @@
+{
+  "name": "SCOFF",
+  "display_name": "进食障碍筛查问卷",
+  "description": "5条目自评筛查，每项是非题。≥2个「是」提示可能存在神经性厌食症或神经性贪食症。灵敏度100%，特异度87.5%。",
+  "scoring_mode": "count_yes",
+  "positive_count": 2,
+  "items": [
+    {
+      "index": 0,
+      "dimension": "催吐行为",
+      "concept": "你是否有因为感到胀满不适而催吐（让自己呕吐）的情况？",
+      "anchors": {
+        "0": "否",
+        "1": "是"
+      }
+    },
+    {
+      "index": 1,
+      "dimension": "进食失控感",
+      "concept": "你是否担心已经失去了对自己进食量的控制？",
+      "anchors": {
+        "0": "否",
+        "1": "是"
+      }
+    },
+    {
+      "index": 2,
+      "dimension": "近期体重下降",
+      "concept": "你最近三个月内体重下降是否超过6.4公斤？",
+      "anchors": {
+        "0": "否",
+        "1": "是"
+      }
+    },
+    {
+      "index": 3,
+      "dimension": "肥胖恐惧",
+      "concept": "你是否认为自己太胖，尽管他人说你太瘦？",
+      "anchors": {
+        "0": "否",
+        "1": "是"
+      }
+    },
+    {
+      "index": 4,
+      "dimension": "食物主导生活",
+      "concept": "你是否觉得食物主导了你的生活？",
+      "anchors": {
+        "0": "否",
+        "1": "是"
+      }
+    }
+  ],
+  "thresholds": [
+    {"min": 0, "max": 1, "level": "低进食障碍风险", "label": "low_risk"},
+    {"min": 2, "max": 5, "level": "可能存在进食障碍（厌食症或贪食症）", "label": "likely_case"}
+  ],
+  "escalation": {
+    "total_score_threshold": 3,
+    "item_triggers": [0],
+    "item_threshold": 1
+  }
+}

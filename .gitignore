@@ -1,0 +1,86 @@
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Evidence (NSFW frames, sensitive)
+evidence/
+
+# Logs / runtime
+*.log
+logs/
+*.pid
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local databases / caches
+*.sqlite
+*.sqlite3
+*.db
+tmp/
+temp/
+
+# Model artifacts
+models/
+checkpoints/
+weights/
+*.pt
+*.pth
+*.onnx
+
+# VS Code extensions
+*.vsix
+
+# Claude config
+.claude/
+
+# Skills
+skills-main/
+
+# Chroma vector index
+data/knowledge/chroma_index/
+
+# Embedding models
+modules/safety/clip-vit-base-patch16/
+
+# NSFW detection model (large files, download separately)
+modules/safety/nsfw_image_detection/
+
+# NICE guidelines (HTML)
+nice_*.html
+
+# Downloaded/exported HTML files in root
+*.html.html
+GV7T4ZM*.html
+modules/safety/siglip2-nsfw/

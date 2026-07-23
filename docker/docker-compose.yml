@@ -1,0 +1,123 @@
+# =============================================================================
+# 生产 docker-compose.yml
+# =============================================================================
+# 启动:  docker compose -f docker/docker-compose.yml --env-file .env up -d
+# 停止:  docker compose -f docker/docker-compose.yml down
+# 查看:  docker compose -f docker/docker-compose.yml ps
+# =============================================================================
+
+services:
+  therapy-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: therapy-agent:latest
+    restart: unless-stopped
+    environment:
+      # LLM — 统一从宿主机 DASHSCOPE_API_KEY 注入，不在 .env 中暴露
+      - OPENAI_API_KEY=${DASHSCOPE_API_KEY}
+      - OPENAI_API_BASE=${OPENAI_API_BASE:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      - MODEL_NAME=${MODEL_NAME:-qwen-max}
+      - SCORING_MODEL_NAME=${SCORING_MODEL_NAME:-qwen3.6-flash}
+      - REWRITER_MODEL_NAME=${REWRITER_MODEL_NAME:-qwen-max}
+      # Embedding
+      - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-api}
+      - LOCAL_EMBEDDING_MODEL=${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3}
+      - EMBEDDING_API_KEY=${DASHSCOPE_API_KEY}
+      - EMBEDDING_MODEL_NAME=${EMBEDDING_MODEL_NAME:-text-embedding-v3}
+      - EMBEDDING_API_BASE=${EMBEDDING_API_BASE:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      # Database
+      - MYSQL_HOST=${MYSQL_HOST:-mysql}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER:-root}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-prism_db}
+      - USE_DATABASE=${USE_DATABASE:-true}
+      # Redis
+      - REDIS_URL=redis://redis:6379/0
+      # Encryption
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      # JWT
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      # Debug
+      - DEBUG=${DEBUG:-false}
+      # ASR / Emotion
+      - ASR_BACKEND=${ASR_BACKEND:-}
+      - EMOTION_ENGINE=${EMOTION_ENGINE:-keyword}
+      # Safety
+      - SAFETY_MODEL_PATH=${SAFETY_MODEL_PATH:-}
+      - SAFETY_NSFW_MODEL_PATH=${SAFETY_NSFW_MODEL_PATH:-}
+      - SAFETY_DEVICE=${SAFETY_DEVICE:-cpu}
+      # Mock switches
+      - MOCK_SAFETY=${MOCK_SAFETY:-false}
+      - MOCK_EMOTION=${MOCK_EMOTION:-false}
+      - MOCK_ROUTER=${MOCK_ROUTER:-false}
+      - MOCK_INTERVENTION=${MOCK_INTERVENTION:-false}
+      # Gunicorn worker 数量（默认由 gunicorn.conf.py 按 CPU 自动计算）
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-}
+    expose:
+      - "8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    tmpfs:
+      - /tmp:exec,size=256M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      therapy-agent:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-prism_db}
+    ports:
+      - "3307:3306"
+    expose:
+      - "3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  mysql_data:
+  redis_data:

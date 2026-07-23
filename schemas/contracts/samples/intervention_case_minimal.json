@@ -1,0 +1,24 @@
+{
+  "contract_version": "1.0",
+  "user_text": "你好",
+  "route": {
+    "contract_version": "1.0",
+    "route": "comfort",
+    "reason": "",
+    "confidence": 1.0
+  },
+  "emotion": {
+    "contract_version": "1.0",
+    "primary_emotion": "neutral",
+    "intensity": 0.5,
+    "risk": 0.0,
+    "modality_notes": {}
+  },
+  "safety": {
+    "contract_version": "1.0",
+    "level": 0,
+    "blocked": false,
+    "matched_terms": [],
+    "meta": {}
+  }
+}

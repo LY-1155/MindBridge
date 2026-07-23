@@ -1,0 +1,12 @@
+# 仅运行 pytest（tests/）。不要在此处 -r requirements.txt，
+# 否则会和「pip install -r requirements.txt」一样拉全量依赖，
+# 在部分环境（如 Python 3.14 + editdistance 源码编译）会失败，导致 pytest 都装不上。
+#
+# 用法：
+#   python -m pip install -r requirements-dev.txt
+#
+# 运行测试仍需项目本身能 import api（通常需先装好业务依赖），请另执行：
+#   python -m pip install -r requirements.txt
+# 若 requirements.txt 安装报错，见 tests/README.md「依赖安装问题」。
+
+pytest>=7.4.0

@@ -1,0 +1,185 @@
+{
+  "name": "LSAS",
+  "display_name": "Liebowitz社交焦虑量表（自评版）",
+  "description": "24条目自评量表，评估社交焦虑在多种场景下的表现。每项评估两个维度：恐惧/焦虑程度(0-3)和回避频率(0-3)。总分0-144（24题×2维度×0-3），≥30提示社交焦虑，≥60提示广泛性社交焦虑障碍。含12项操作情境(P)和12项社交互动情境(S)。",
+  "scoring_mode": "lsas",
+  "dual_dimensions": {
+    "fear": {
+      "label": "恐惧/焦虑",
+      "key": "fear",
+      "anchors": {
+        "0": "无",
+        "1": "轻度",
+        "2": "中度",
+        "3": "重度"
+      }
+    },
+    "avoidance": {
+      "label": "回避",
+      "key": "avoidance",
+      "anchors": {
+        "0": "从不(0%)",
+        "1": "偶尔(1-33%)",
+        "2": "经常(33-67%)",
+        "3": "通常(67-100%)"
+      }
+    }
+  },
+  "items": [
+    {
+      "index": 0,
+      "category": "performance",
+      "situation": "在公共场合打电话",
+      "concept": "在他人面前或可能被他人听到的情况下打电话"
+    },
+    {
+      "index": 1,
+      "category": "performance",
+      "situation": "参与小组活动",
+      "concept": "在一个较小群体中参与讨论或互动"
+    },
+    {
+      "index": 2,
+      "category": "performance",
+      "situation": "在公共场所吃东西",
+      "concept": "在餐厅、食堂等公共场合进食"
+    },
+    {
+      "index": 3,
+      "category": "performance",
+      "situation": "在公共场所与他人一起喝酒",
+      "concept": "在公共场合与他人一起饮酒"
+    },
+    {
+      "index": 4,
+      "category": "social",
+      "situation": "与权威人士交谈",
+      "concept": "与上级、老师、领导等权威人物说话"
+    },
+    {
+      "index": 5,
+      "category": "performance",
+      "situation": "在观众面前表演、表演或做演讲",
+      "concept": "在众人面前发言、表演或做报告"
+    },
+    {
+      "index": 6,
+      "category": "social",
+      "situation": "参加聚会",
+      "concept": "参加社交聚会或派对"
+    },
+    {
+      "index": 7,
+      "category": "performance",
+      "situation": "在被观察时工作",
+      "concept": "在他人观看或注视的状态下完成工作"
+    },
+    {
+      "index": 8,
+      "category": "performance",
+      "situation": "在被观察时书写",
+      "concept": "在他人观看或注视的状态下写字或填写表格"
+    },
+    {
+      "index": 9,
+      "category": "social",
+      "situation": "给不太熟悉的人打电话",
+      "concept": "主动致电一个不太了解的人"
+    },
+    {
+      "index": 10,
+      "category": "social",
+      "situation": "与不太熟悉的人交谈",
+      "concept": "与不熟悉的人进行对话交流"
+    },
+    {
+      "index": 11,
+      "category": "social",
+      "situation": "与陌生人见面",
+      "concept": "初次见到陌生人并进行互动"
+    },
+    {
+      "index": 12,
+      "category": "performance",
+      "situation": "在公共厕所小便",
+      "concept": "在公厕可能被他人看到或听到的情况下小便"
+    },
+    {
+      "index": 13,
+      "category": "performance",
+      "situation": "进入他人已就坐的房间",
+      "concept": "走进一个其他人已经坐好的房间"
+    },
+    {
+      "index": 14,
+      "category": "social",
+      "situation": "成为关注的焦点",
+      "concept": "成为众人注意的中心或焦点"
+    },
+    {
+      "index": 15,
+      "category": "performance",
+      "situation": "在会议上发言",
+      "concept": "在小组会议中出声表达意见"
+    },
+    {
+      "index": 16,
+      "category": "performance",
+      "situation": "参加考试/测试",
+      "concept": "进行能力测试或考试"
+    },
+    {
+      "index": 17,
+      "category": "social",
+      "situation": "向不熟悉的人表达不同意见或反对",
+      "concept": "对不太熟悉的人表达不同意见或不赞同"
+    },
+    {
+      "index": 18,
+      "category": "social",
+      "situation": "与不熟悉的人进行目光接触",
+      "concept": "与不太熟悉的人保持眼神对视"
+    },
+    {
+      "index": 19,
+      "category": "performance",
+      "situation": "向一群人做报告",
+      "concept": "面向一组人进行正式汇报或报告"
+    },
+    {
+      "index": 20,
+      "category": "performance",
+      "situation": "尝试吸引心仪对象",
+      "concept": "主动尝试接近或搭讪有好感的人"
+    },
+    {
+      "index": 21,
+      "category": "social",
+      "situation": "去商店退货",
+      "concept": "因为退货原因去商店与店员交涉"
+    },
+    {
+      "index": 22,
+      "category": "social",
+      "situation": "举办聚会",
+      "concept": "以主人身份举办社交聚会"
+    },
+    {
+      "index": 23,
+      "category": "social",
+      "situation": "抵抗高压销售员",
+      "concept": "面对推销人员的高压销售策略时坚持拒绝"
+    }
+  ],
+  "thresholds": [
+    {"min": 0, "max": 29, "level": "无明显社交焦虑", "label": "none"},
+    {"min": 30, "max": 59, "level": "社交焦虑", "label": "social_anxiety"},
+    {"min": 60, "max": 89, "level": "广泛性社交焦虑", "label": "generalized_sa"},
+    {"min": 90, "max": 144, "level": "重度广泛性社交焦虑", "label": "severe"}
+  ],
+  "escalation": {
+    "total_score_threshold": 90,
+    "item_triggers": [],
+    "item_threshold": 0
+  }
+}

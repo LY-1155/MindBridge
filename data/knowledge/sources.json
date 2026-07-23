@@ -1,0 +1,65 @@
+{
+  "description": "知识库配置 v4：私有+公有统一 Chroma 索引 + BM25 关键词 + 外部 API Tavily 搜索兜底，9 类精简分类（见 ADR 0007/0009）",
+  "layers": [
+    {
+      "id": "hospital_private",
+      "name": "医院合作私有案例库",
+      "priority": 1,
+      "type": "local",
+      "path": "data/knowledge/private/",
+      "format": "jsonl",
+      "deidentify": true,
+      "enabled": true,
+      "note": "category=clinical。临床咨询记录脱敏提取知识，含家庭治疗、沟通技法、个案概念化等"
+    },
+    {
+      "id": "public_psychology",
+      "name": "公有心理学知识库",
+      "priority": 2,
+      "type": "local",
+      "path": "data/knowledge/public/",
+      "format": "jsonl",
+      "deidentify": false,
+      "enabled": true,
+      "note": "8 个公有类别：disorder_knowledge / coping_strategies / medication_knowledge / sleep_health / trauma_and_stress / grief_and_loss / relationships / psychology_basics"
+    },
+    {
+      "id": "external_api",
+      "name": "外部 API 搜索兜底",
+      "priority": 3,
+      "type": "http",
+      "provider": "tavily",
+      "api_key_env": "TAVILY_API_KEY",
+      "timeout_seconds": 15,
+      "enabled": true,
+      "note": "Tavily Search API 实时检索。药物名感知触发（覆盖 50+ 种精神科药物），后续扩展到分数阈值通用 fallback（ADR 0008）"
+    }
+  ],
+  "categories": {
+    "private": ["clinical"],
+    "public": [
+      "disorder_knowledge",
+      "coping_strategies",
+      "medication_knowledge",
+      "sleep_health",
+      "trauma_and_stress",
+      "grief_and_loss",
+      "relationships",
+      "psychology_basics"
+    ]
+  },
+  "retrieval": {
+    "top_k": 3,
+    "min_score": 0.5,
+    "rrf_k": 60
+  },
+  "source_weights": {
+    "private": 1.2,
+    "public": 1.0
+  },
+  "embedding": {
+    "provider": "ollama",
+    "model": "bge-m3",
+    "dimension": 1024
+  }
+}

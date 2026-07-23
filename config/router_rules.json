@@ -1,0 +1,80 @@
+{
+  "thresholds": {
+    "crisis_risk": 0.7,
+    "comfort_risk": 0.5,
+    "knowledge_risk": 0.1
+  },
+  "emotion_bias": {
+    "neutral": {
+      "prefer": null,
+      "confidence_penalty": 0.0
+    },
+    "anxiety": {
+      "prefer": "comfort",
+      "confidence_penalty": 0.05
+    },
+    "sadness": {
+      "prefer": "comfort",
+      "confidence_penalty": 0.05
+    },
+    "anger": {
+      "prefer": "knowledge",
+      "confidence_penalty": 0.05
+    },
+    "fear": {
+      "prefer": "comfort",
+      "confidence_penalty": 0.05
+    },
+    "stress": {
+      "prefer": "knowledge",
+      "confidence_penalty": 0.05
+    },
+    "happiness": {
+      "prefer": null,
+      "confidence_penalty": 0.0
+    },
+    "confusion": {
+      "prefer": "knowledge",
+      "confidence_penalty": 0.05
+    }
+  },
+  "anger_high_intensity_reverse": {
+    "threshold": 0.7,
+    "prefer": "comfort"
+  },
+  "confidence": {
+    "min": 0.5,
+    "max": 1.0,
+    "boundary_near_distance": 0.05,
+    "boundary_near_penalty": 0.15,
+    "boundary_close_distance": 0.1,
+    "boundary_close_penalty": 0.08,
+    "safety_escalate_penalty": 0.05,
+    "emotion_bias_conflict_penalty": 0.05,
+    "mixed_signals_penalty": 0.1,
+    "llm_agree_boost_to": 0.85
+  },
+  "llm_fallback": {
+    "enabled": true,
+    "trigger_confidence_below": 0.7,
+    "trigger_on_mixed_signals": true
+  },
+  "safety_escalation": {
+    "level_1_escalate": true
+  },
+  "risk_formula": {
+    "emotion_base": {
+      "fear": 0.45,
+      "anxiety": 0.35,
+      "anger": 0.4,
+      "stress": 0.4,
+      "sadness": 0.3,
+      "confusion": 0.2,
+      "happiness": 0.0,
+      "neutral": 0.0,
+      "distress": 0.8
+    },
+    "intensity_weight": 0.25,
+    "safety_weight": 0.2
+  }
+}

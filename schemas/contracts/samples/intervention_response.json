@@ -1,0 +1,15 @@
+{
+  "contract_version": "1.0",
+  "reply": "[mock-comfort] 收到，我们会陪伴你一步步处理。",
+  "empathy": "我理解你现在不容易。",
+  "suggestion": "可以先试着做一次缓慢深呼吸。",
+  "action_items": [
+    "深呼吸 3 次",
+    "记录一件今天的小事"
+  ],
+  "chain_of_thought": "mock → 固定模板",
+  "emergency_triggered": false,
+  "meta": {
+    "implementation": "mock"
+  }
+}

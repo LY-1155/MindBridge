@@ -1,0 +1,124 @@
+{
+  "_comment": "校准样本：每一条包含风险公式的输入和期望路由。路由顺序已调整为 general→knowledge→comfort→crisis（高情绪先安抚，低情绪给知识）。",
+  "samples": [
+    {
+      "text": "我感到十分紧张焦虑",
+      "primary_emotion": "anxiety",
+      "intensity": 0.77,
+      "safety_level": 0,
+      "expected_route": "comfort"
+    },
+    {
+      "text": "我最近感到有些焦虑",
+      "primary_emotion": "anxiety",
+      "intensity": 0.38,
+      "safety_level": 0,
+      "expected_route": "knowledge"
+    },
+    {
+      "text": "我很难过，完全提不起精神",
+      "primary_emotion": "sadness",
+      "intensity": 0.65,
+      "safety_level": 0,
+      "expected_route": "knowledge"
+    },
+    {
+      "text": "我觉得生活没有任何意义了",
+      "primary_emotion": "sadness",
+      "intensity": 0.85,
+      "safety_level": 1,
+      "expected_route": "crisis"
+    },
+    {
+      "text": "今天天气不错",
+      "primary_emotion": "neutral",
+      "intensity": 0.1,
+      "safety_level": 0,
+      "expected_route": "general"
+    },
+    {
+      "text": "我很生气，想打人",
+      "primary_emotion": "anger",
+      "intensity": 0.70,
+      "safety_level": 0,
+      "expected_route": "comfort"
+    },
+    {
+      "text": "我对考试感到担心",
+      "primary_emotion": "anxiety",
+      "intensity": 0.50,
+      "safety_level": 0,
+      "expected_route": "knowledge"
+    },
+    {
+      "text": "我每天晚上都睡不着，一直失眠",
+      "primary_emotion": "stress",
+      "intensity": 0.72,
+      "safety_level": 0,
+      "expected_route": "comfort"
+    },
+    {
+      "text": "我特别害怕一个人走夜路，总觉得不安全",
+      "primary_emotion": "fear",
+      "intensity": 0.55,
+      "safety_level": 0,
+      "expected_route": "comfort"
+    },
+    {
+      "text": "我害怕他会再次伤害我",
+      "primary_emotion": "fear",
+      "intensity": 0.70,
+      "safety_level": 1,
+      "expected_route": "crisis"
+    },
+    {
+      "text": "看完恐怖片后心里一直害怕",
+      "primary_emotion": "fear",
+      "intensity": 0.45,
+      "safety_level": 0,
+      "expected_route": "comfort"
+    },
+    {
+      "text": "我对未来很迷茫，不知道该做什么选择",
+      "primary_emotion": "confusion",
+      "intensity": 0.55,
+      "safety_level": 0,
+      "expected_route": "knowledge"
+    },
+    {
+      "text": "我现在脑子一团乱，完全理不清思绪",
+      "primary_emotion": "confusion",
+      "intensity": 0.70,
+      "safety_level": 0,
+      "expected_route": "knowledge"
+    },
+    {
+      "text": "有点困惑但问题不大",
+      "primary_emotion": "confusion",
+      "intensity": 0.25,
+      "safety_level": 0,
+      "expected_route": "knowledge"
+    },
+    {
+      "text": "今天心情特别好，和朋友出去玩了一天",
+      "primary_emotion": "happiness",
+      "intensity": 0.20,
+      "safety_level": 0,
+      "expected_route": "general"
+    },
+    {
+      "text": "刚收到录取通知，太开心了！",
+      "primary_emotion": "happiness",
+      "intensity": 0.60,
+      "safety_level": 0,
+      "expected_route": "knowledge"
+    },
+    {
+      "text": "最近慢慢走出来了，状态在恢复",
+      "primary_emotion": "happiness",
+      "intensity": 0.30,
+      "safety_level": 0,
+      "expected_route": "general"
+    }
+  ]
+}

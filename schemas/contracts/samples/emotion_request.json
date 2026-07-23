@@ -1,0 +1,12 @@
+{
+  "contract_version": "1.0",
+  "text": "最近压力很大，睡不着，有点焦虑。",
+  "session_id": "sess-demo-001",
+  "safety": {
+    "contract_version": "1.0",
+    "level": 0,
+    "blocked": false,
+    "matched_terms": [],
+    "meta": {}
+  }
+}

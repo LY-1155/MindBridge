@@ -1,0 +1,9 @@
+{
+  "contract_version": "1.0",
+  "primary_emotion": "neutral",
+  "intensity": 0.5,
+  "risk": 0.1,
+  "modality_notes": {
+    "implementation": "mock"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "contract_version": "1.0",
+  "user_text": "最近工作压力很大，晚上睡不着，有点焦虑，不知道该怎么办。",
+  "session_id": "test-intervention-comfort-001",
+  "route": {
+    "contract_version": "1.0",
+    "route": "comfort",
+    "reason": "risk_below_0.3",
+    "confidence": 0.88
+  },
+  "emotion": {
+    "contract_version": "1.0",
+    "primary_emotion": "anxiety",
+    "intensity": 0.62,
+    "risk": 0.22,
+    "modality_notes": {
+      "source": "test_fixture"
+    }
+  },
+  "safety": {
+    "contract_version": "1.0",
+    "level": 0,
+    "blocked": false,
+    "matched_terms": [],
+    "meta": {}
+  }
+}

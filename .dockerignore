@@ -1,0 +1,80 @@
+# 密钥 / 凭证（不入镜像）
+.env
+.env.*
+!.env.example
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 证据文件（NSFW 帧等敏感数据）
+evidence/
+
+# 模型文件（体积大，运行时挂载）
+models/
+checkpoints/
+weights/
+*.pt
+*.pth
+*.onnx
+
+# Chroma 向量索引
+data/knowledge/chroma_index/
+
+# 嵌入模型
+modules/safety/clip-vit-base-patch16/
+
+# NSFW 检测模型
+modules/safety/nsfw_image_detection/
+
+# 文档 / 草稿（非运行时必需）
+docs/
+.agents/
+.scratch/
+CLAUDE.md
+CONTEXT.md
+*.md
+
+# Docker 自身
+docker/
+!docker/docker-entrypoint.sh
+*.sqlite
+*.sqlite3
+
+# 测试
+tests/
+pytest.ini
+
+# Nginx（独立容器管理）
+nginx/
+
+# 日志
+*.log
+logs/
+
+# 临时文件
+tmp/
+temp/

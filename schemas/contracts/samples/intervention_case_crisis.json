@@ -1,0 +1,30 @@
+{
+  "contract_version": "1.0",
+  "user_text": "我不想活了，已经写好遗言，今晚就准备结束。",
+  "session_id": "test-intervention-crisis-001",
+  "route": {
+    "contract_version": "1.0",
+    "route": "crisis",
+    "reason": "high_risk_or_safety_shortcut",
+    "confidence": 0.95
+  },
+  "emotion": {
+    "contract_version": "1.0",
+    "primary_emotion": "distress",
+    "intensity": 0.98,
+    "risk": 0.96,
+    "modality_notes": {
+      "source": "test_fixture",
+      "warning": "仅用于接口与流程联调，非真实危机处置"
+    }
+  },
+  "safety": {
+    "contract_version": "1.0",
+    "level": 2,
+    "blocked": true,
+    "matched_terms": ["结束生命", "遗言"],
+    "meta": {
+      "scenario": "crisis_path_test_only"
+    }
+  }
+}
