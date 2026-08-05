@@ -263,7 +263,13 @@ class SpeechRecognizer:
         if self.backend == "sensevoice":
             try:
                 logger.info("Transcribe (SenseVoice): %s", audio_path)
-                return self._transcribe_sensevoice(audio_path, language, task)
+                result = self._transcribe_sensevoice(audio_path, language, task)
+                if result.text.strip():
+                    return result
+                logger.warning(
+                    "SenseVoice returned empty text (duration=%.1fs), falling back to Whisper",
+                    result.duration,
+                )
             except Exception as exc:
                 logger.warning("SenseVoice ASR failed, falling back to Whisper: %s", exc)
 

@@ -21,34 +21,31 @@ import uuid
 from typing import Iterable, Optional
 
 from fastapi import Request
-from fastapi.routing import _IncludedRouter
 from starlette.routing import BaseRoute, Match
 from starlette.types import Scope
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+# FastAPI >=0.128 移除了 _IncludedRouter，此处保留兼容性检查
+try:
+    from fastapi.routing import _IncludedRouter  # type: ignore
+except ImportError:
+    _IncludedRouter = None  # type: ignore
+
 
 # ── 补丁：slowapi 的 _find_route_handler 不认识 FastAPI 的 _IncludedRouter ──
-# app.include_router() 会把路由包在 _IncludedRouter 里，后者没有 .endpoint 属性。
-# 这里递归展开 _IncludedRouter → 找到真正的 Route.endpoint。
 def _patched_find_route_handler(
     routes: Iterable[BaseRoute], scope: Scope
 ) -> Optional:
-    """递归搜索路由，兼容 FastAPI 的 _IncludedRouter 包装。
-
-    FastAPI 的 app.include_router() 会把路由包在 _IncludedRouter 里，
-    后者没有 .endpoint 属性，需要递归进入 original_router.routes 查找。
-    original_router.routes 里的 Route 持有完整路径（已含 prefix），
-    所以递归时复用原始 scope 即可。
-    """
+    """递归搜索路由，兼容 FastAPI 的 _IncludedRouter 包装。"""
     for route in routes:
         match, _ = route.matches(scope)
         if match != Match.FULL:
             continue
         if hasattr(route, "endpoint"):
             return route.endpoint
-        # FastAPI _IncludedRouter: 进入子路由递归
-        if isinstance(route, _IncludedRouter):
+        # FastAPI _IncludedRouter: 进入子路由递归（FastAPI < 0.128）
+        if _IncludedRouter is not None and isinstance(route, _IncludedRouter):
             handler = _patched_find_route_handler(
                 route.original_router.routes, scope
             )

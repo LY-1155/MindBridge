@@ -39,7 +39,7 @@ import uuid
 # 这样可以确保所有模块都能正确导入
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from api.routes import auth, chat, multimodal, parallel_modules, pipeline, user
+from api.routes import auth, chat, multimodal, parallel_modules, pipeline, user, ws
 from config.settings import settings
 from modules.rate_limit import limiter
 
@@ -219,6 +219,7 @@ app.include_router(pipeline.router)
 app.include_router(auth.router)
 app.include_router(parallel_modules.router)
 app.include_router(user.router)
+app.include_router(ws.router)
 
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")

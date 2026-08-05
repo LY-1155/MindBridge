@@ -135,23 +135,47 @@ class KnowledgeRetriever:
         if self._hybrid is not None:
             return
 
-        # Chroma
-        if os.path.isdir(str(_CHROMA_PERSIST_DIR)):
-            try:
-                from core.rag.embedder import create_embedder
-                from config.settings import settings
+        # Chroma — 优先尝试 HTTP（Docker server 模式），回退到 PersistentClient
+        try:
+            from core.rag.embedder import create_embedder
+            from config.settings import settings
 
-                embedder = create_embedder(backend=settings.EMBEDDING_BACKEND)
-                self._chroma = ChromaStore(
-                    collection_name="knowledge_base",
-                    embedding_fn=embedder,
-                    persist_dir=str(_CHROMA_PERSIST_DIR),
+            embedder = create_embedder(backend=settings.EMBEDDING_BACKEND)
+
+            # 先尝试 HTTP client（Docker Chroma server）
+            try:
+                import httpx
+                resp = httpx.get(
+                    f"http://{settings.CHROMA_HTTP_HOST}:{settings.CHROMA_HTTP_PORT}/api/v2/heartbeat",
+                    timeout=2,
                 )
+                if resp.status_code == 200:
+                    self._chroma = ChromaStore(
+                        collection_name="knowledge_base",
+                        embedding_fn=embedder,
+                        use_http=True,
+                        http_host=settings.CHROMA_HTTP_HOST,
+                        http_port=settings.CHROMA_HTTP_PORT,
+                    )
+                    logger.info("Chroma 已通过 HTTP 连接 (Docker server)")
             except Exception:
-                logger.warning("Chroma 索引加载失败，将仅使用 BM25 检索", exc_info=True)
-                self._chroma = None
-        else:
-            logger.info("Chroma 索引目录不存在，将仅使用 BM25 检索")
+                # HTTP 不可用，回退到本地 PersistentClient
+                if os.path.isdir(str(_CHROMA_PERSIST_DIR)):
+                    try:
+                        self._chroma = ChromaStore(
+                            collection_name="knowledge_base",
+                            embedding_fn=embedder,
+                            persist_dir=str(_CHROMA_PERSIST_DIR),
+                        )
+                        logger.info("Chroma 已通过本地 PersistentClient 加载")
+                    except Exception:
+                        logger.warning("Chroma 索引加载失败，将仅使用 BM25 检索", exc_info=True)
+                        self._chroma = None
+                else:
+                    logger.info("Chroma 索引目录不存在，将仅使用 BM25 检索")
+        except Exception:
+            logger.warning("Chroma 初始化失败，将仅使用 BM25 检索", exc_info=True)
+            self._chroma = None
 
         from config.settings import settings
 

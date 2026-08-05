@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     EMBEDDING_API_KEY: str = "ollama"
     EMBEDDING_DIMENSIONS: int = 0  # 0=模型默认(1024); 2048=高精度
     LOCAL_EMBEDDING_MODEL: str = "BAAI/bge-m3"
+    # ── Chroma HTTP (Docker server) ───────────────────────────
+    CHROMA_HTTP_HOST: str = "localhost"
+    CHROMA_HTTP_PORT: int = 8001
     # ── Reranker ─────────────────────────────────────────────
     RERANK_MODEL_NAME: str = "qwen3-rerank"  # 百炼重排序模型
     # ── RRF 融合 ─────────────────────────────────────────────
@@ -48,6 +51,10 @@ class Settings(BaseSettings):
     MOCK_EMOTION: bool = True
     MOCK_ROUTER: bool = True
     MOCK_INTERVENTION: bool = True
+
+    # ── 医生模式（周医生 persona + 家庭系统评估 + SCID 后台追踪）────
+    DOCTOR_MODE: bool = False       # 总开关；true=启用周医生风格对话
+    DOCTOR_PERSONA: str = "zhou"    # persona 选择（zhou / future personas）
 
     # ASR（听写）：sensevoice 偏中文口语场景；无 funasr 或失败时自动回退 whisper
     ASR_BACKEND: str = "sensevoice"

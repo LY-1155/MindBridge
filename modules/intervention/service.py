@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Optional, AsyncIterator
 
+from config.settings import settings
 from schemas.contracts import InterventionRequest, InterventionResult
 from modules.intervention.crisis_handler import CrisisHandler
 
@@ -77,6 +78,80 @@ class InterventionService:
             return None
         from core.memory.session_memory import SessionManager
         return SessionManager.get_session(session_id)
+
+    def _get_assessor(self):
+        """延迟初始化 FamilySystemAssessor。"""
+        if not hasattr(self, "_assessor"):
+            from modules.assessment.family_assessor import FamilySystemAssessor
+            self._assessor = FamilySystemAssessor()
+        return self._assessor
+
+    def _get_scid_tracker(self):
+        """延迟初始化 SCIDTracker。"""
+        if not hasattr(self, "_scid_tracker"):
+            from modules.assessment.scid_tracker import SCIDTracker
+            self._scid_tracker = SCIDTracker()
+        return self._scid_tracker
+
+    # ── 医生模式：共享评估逻辑 ──────────────────────────────
+
+    def _run_doctor_assessment(
+        self, req: InterventionRequest, session, route: str
+    ) -> tuple[str, Optional[str]]:
+        """DOCTOR_MODE 共享评估：返回 (possibly_upgraded_route, enriched_query)。"""
+        if not settings.DOCTOR_MODE or session is None or route == "crisis":
+            return route, None
+
+        scid_enriched_query: Optional[str] = None
+        try:
+            assessor = self._get_assessor()
+            assess_result = assessor.assess(
+                user_text=req.user_text,
+                message_count=session.metadata.message_count,
+                existing_phase=session.metadata.phase,
+                existing_hypothesis=session.metadata.working_hypothesis,
+                existing_members=session.metadata.family_members,
+                emotion=req.emotion or {},
+                route=req.route or {},
+            )
+
+            if assess_result.suggested_phase != session.metadata.phase:
+                session.update_phase(assess_result.suggested_phase)
+            if assess_result.hypothesis_update is not None:
+                session.update_hypothesis(assess_result.hypothesis_update)
+            for member in assess_result.new_family_members:
+                session.add_family_member(
+                    role=member["role"], label=member.get("label", "")
+                )
+
+            tracker = self._get_scid_tracker()
+            scid_update = tracker.update(
+                user_text=req.user_text,
+                existing_flags=session.metadata.scid_flags,
+            )
+            session.update_scid_flags(scid_update.criteria_met)
+
+            if scid_update.risk_flags:
+                route = "crisis"
+                logger.info(
+                    "[DOCTOR_MODE] SCID risk flags: %s → crisis",
+                    scid_update.risk_flags,
+                )
+            if scid_update.suggested_retrieval_query:
+                scid_enriched_query = scid_update.suggested_retrieval_query
+            if assess_result.escalation_flag:
+                route = "crisis"
+                logger.info("[DOCTOR_MODE] Assessor escalation → crisis")
+
+            logger.debug(
+                "[DOCTOR_MODE] phase=%s probe=%s",
+                assess_result.suggested_phase,
+                assess_result.probe_direction,
+            )
+        except Exception:
+            logger.warning("[DOCTOR_MODE] Assessment failed", exc_info=True)
+
+        return route, scid_enriched_query
 
     def _resolve_route(self, req: InterventionRequest) -> str:
         """处理低置信度回退：knowledge/general + confidence<0.5 → 退回上一级"""
@@ -195,6 +270,9 @@ class InterventionService:
                     },
                 )
 
+        # ── 医生模式 ──
+        route, scid_enriched_query = self._run_doctor_assessment(req, session, route)
+
         # INTERVENTION TRACE — 分发分支
         logger.info("[PIPELINE:TRACE] INTERVENTION dispatch → %s", route)
 
@@ -210,7 +288,9 @@ class InterventionService:
         if route == "knowledge":
             session = self._get_session(req.session_id)
             orch = self._get_orchestrator()
-            if session is not None and orch is not None:
+            # DOCTOR_MODE：跳过量表自动触发，走周医生自然对话（RAG + persona）。
+            # 量表仍是后台能力，但家庭对话不主动打断节奏。
+            if session is not None and orch is not None and not settings.DOCTOR_MODE:
                 # 可触发量表：LLM 语义匹配 → 列表，D10 串行执行
                 triggered_scales = orch.should_trigger(req.user_text, req.emotion or {})
                 if triggered_scales:
@@ -247,10 +327,14 @@ class InterventionService:
                     )
 
             # 默认：RAG + LLM（量表结果反哺知识检索）
-            enriched_query = req.user_text
-            if session is not None:
-                from modules.intervention.rag.scale_feedback import enrich_query_with_scale
-                enriched_query = enrich_query_with_scale(req.user_text, session)
+            # 医生模式：优先使用 SCID tracker 生成的精准 query
+            if scid_enriched_query:
+                enriched_query = scid_enriched_query
+            else:
+                enriched_query = req.user_text
+                if session is not None:
+                    from modules.intervention.rag.scale_feedback import enrich_query_with_scale
+                    enriched_query = enrich_query_with_scale(req.user_text, session)
             return self._get_generator().generate_knowledge(req, enriched_query=enriched_query)
 
         # 未知路由，返回占位
@@ -342,6 +426,9 @@ class InterventionService:
                 yield result.reply  # 单 chunk，量表话术不用 LLM
                 return
 
+        # ── 医生模式 ──
+        route, scid_enriched_query = self._run_doctor_assessment(req, session, route)
+
         # INTERVENTION TRACE
         logger.info("[PIPELINE:TRACE] INTERVENTION dispatch (stream) → %s", route)
 
@@ -363,7 +450,8 @@ class InterventionService:
         if route == "knowledge":
             session = self._get_session(req.session_id)
             orch = self._get_orchestrator()
-            if session is not None and orch is not None:
+            # DOCTOR_MODE：跳过量表自动触发，走周医生自然对话
+            if session is not None and orch is not None and not settings.DOCTOR_MODE:
                 triggered_scales = orch.should_trigger(req.user_text, req.emotion or {})
                 if triggered_scales:
                     scale_name = triggered_scales[0]
@@ -390,10 +478,13 @@ class InterventionService:
                     yield reply  # 量表启动话术，单 chunk
                     return
 
-            enriched_query = req.user_text
-            if session is not None:
-                from modules.intervention.rag.scale_feedback import enrich_query_with_scale
-                enriched_query = enrich_query_with_scale(req.user_text, session)
+            if scid_enriched_query:
+                enriched_query = scid_enriched_query
+            else:
+                enriched_query = req.user_text
+                if session is not None:
+                    from modules.intervention.rag.scale_feedback import enrich_query_with_scale
+                    enriched_query = enrich_query_with_scale(req.user_text, session)
             async for token in self._get_generator().astream_knowledge(req, enriched_query=enriched_query):
                 yield token
             return

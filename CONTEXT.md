@@ -136,6 +136,24 @@ Router 对分派决策的确定程度（0~1）。受 risk 与阈值的距离、�
 ### 视频预处理（Video Preprocessor）
 管线的前置步骤，负责将视频文件解构为管线可用的信号。流程：视频 → ffmpeg 分离音频 → 自适应抽帧（min(时长×1fps, 20) 帧）→ 每帧人脸检测 + 情绪推理 + 标签映射 → 时序加权聚合产出 `visual_emotion` → SenseVoice 一次推理产出 ASR 文本 + `audio_emotion`。输入为视频文件和可选的独立音频文件，输出为 text、audio_emotion、visual_emotion 三路信号。
 
+### 实时语音对话（Real-time Voice Conversation）
+管线的一种新入口模式：用户通过按住说话（push-to-talk）发送语音，AI 以流式语音回复，交互载体为 WebSocket 双向通道。与回合制文字对话共享同一管线逻辑（安全→情绪→路由→干预），差异在传输层和交互方式。按住期间推送 Opus/WebM 音频 chunk，松手后走串行管线 → 情绪融合 → LLM 流式生成 → 逐句 TTS 合成 → 二进制音频流推送前端播放。语音语调情绪由 SenseVoice 在 ASR 时一并产出，与文本情绪经情绪融合层合并。详见 ADR 0012。
+
+### WebSocket 连接（WebSocket Connection）
+实时语音对话的传输通道。一条 WebSocket 连接对应一个会话，生命周期覆盖整段对话。连接建立时通过 URL 参数携带 JWT access token 认证。消息协议为 JSON 控制帧 + 二进制音频帧混合，以首个字节区分类型。
+
+### 按住说话（Push-to-Talk）
+实时语音对话的输入交互模式。用户按住录音按钮期间持续推送音频 chunk（MediaRecorder + Opus/WebM），松手时发送 `audio.end` 触发管道处理。滑出按钮区域松手则发送 `cancel`，服务端清空音频缓冲区。
+
+### 语音取消（Voice Cancel）
+按住说话的安全兜底机制。用户在录音过程中滑出按钮区域并松手，前端发送 `cancel` 帧，服务端收到后清空已缓冲的音频数据，不触发管道处理。
+
+### 逐句合成（Sentence-by-Sentence Synthesis）
+TTS 流式推送的触发策略。LLM 流式输出 token 时按语义边界积累文本——遇到句号、问号、感叹号或换行符时，将已积累的完整句子送 Edge TTS 合成，边合成边推送音频 chunk。首句合成即前端开始播放，后续句子异步追加。避免在词中间切断的同时保持低首音延迟。
+
+### WebSocket 管道服务（WebSocket Pipeline Service）
+WebSocket 版的管道入口（`pipeline/ws_pipeline.py`）。输入为音频 bytes，内部依次调用 ASR → Safety → Emotion → Router → Intervention → TTS，通过回调函数接口推送状态更新（status / text.delta / audio.delta / emotion.result / done / error）至 WebSocket handler。与 HTTP 版管道共享核心模块，差异仅为输出方式（回调推送 vs 返回值）。
+
 ### 模态降级（Modality Degradation）
 当某路情绪信号无法获取时的静默处理策略。文本（ASR 产出）为必选项，不可降级；音频和视觉为加分项，任一失败时跳过该路、经由剩余信号继续融合，并在 `modality_notes` 中记录降级原因。视觉信号内部，当人脸检测帧占比低于 30% 时整段降级为不可靠。
 

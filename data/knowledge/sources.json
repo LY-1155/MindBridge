@@ -21,7 +21,7 @@
       "format": "jsonl",
       "deidentify": false,
       "enabled": true,
-      "note": "8 个公有类别：disorder_knowledge / coping_strategies / medication_knowledge / sleep_health / trauma_and_stress / grief_and_loss / relationships / psychology_basics"
+      "note": "9 个公有类别：disorder_knowledge / coping_strategies / medication_knowledge / sleep_health / trauma_and_stress / grief_and_loss / relationships / psychology_basics / diagnostic_framework。diagnostic_framework.jsonl 为 SCID-5-CV 结构化诊断框架（操作型知识，非科普）"
     },
     {
       "id": "external_api",
@@ -45,7 +45,8 @@
       "trauma_and_stress",
       "grief_and_loss",
       "relationships",
-      "psychology_basics"
+      "psychology_basics",
+      "diagnostic_framework"
     ]
   },
   "retrieval": {

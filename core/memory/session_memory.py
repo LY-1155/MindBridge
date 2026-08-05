@@ -46,6 +46,15 @@ class SessionMetadata(BaseModel):
     scale_state: Optional[Dict[str, Any]] = None
     scale_history: List[Dict[str, Any]] = Field(default_factory=list)
 
+    # ── 医生模式字段（DOCTOR_MODE=true 时使用）──────────────────
+    phase: str = "check_in"  # 当前 session 阶段：check_in / explore / interpret / intervene
+    family_members: List[Dict[str, Any]] = Field(default_factory=list)
+    #   family_members 条目示例：{"role": "妈妈", "label": "焦虑型", "noted_at": "..."}
+    working_hypothesis: Optional[str] = None
+    #   如 "孩子的不上学可能承担了转移父母冲突的功能"
+    scid_flags: Dict[str, Any] = Field(default_factory=dict)
+    #   静默 SCID 追踪：{"MDD": {"criteria_met": ["sleep", "anhedonia"], "count": 2}, ...}
+
 
 class EmotionRecord(BaseModel):
     """情绪记录"""
@@ -127,6 +136,10 @@ class TherapySessionMemory:
                     probed_dimensions=meta.get("probed_dimensions", []),
                     scale_state=meta.get("scale_state"),
                     scale_history=meta.get("scale_history", []),
+                    phase=meta.get("phase", "check_in"),
+                    family_members=meta.get("family_members", []),
+                    working_hypothesis=meta.get("working_hypothesis"),
+                    scid_flags=meta.get("scid_flags", {}),
                 )
                 logger.debug("[SCALE:LOAD] Redis HIT session=%s scale_state=%s",
                              self.session_id,
@@ -165,6 +178,10 @@ class TherapySessionMemory:
                     probed_dimensions=session_data.get("probed_dimensions", []),
                     scale_state=session_data.get("scale_state"),
                     scale_history=session_data.get("scale_history", []),
+                    phase=session_data.get("phase", "check_in"),
+                    family_members=session_data.get("family_members", []),
+                    working_hypothesis=session_data.get("working_hypothesis"),
+                    scid_flags=session_data.get("scid_flags", {}),
                 )
                 # 回填 Redis 缓存
                 self._sync_meta_to_redis()
@@ -215,6 +232,10 @@ class TherapySessionMemory:
                     "probed_dimensions": self.metadata.probed_dimensions,
                     "scale_state": self.metadata.scale_state,
                     "scale_history": self.metadata.scale_history,
+                    "phase": self.metadata.phase,
+                    "family_members": self.metadata.family_members,
+                    "working_hypothesis": self.metadata.working_hypothesis,
+                    "scid_flags": self.metadata.scid_flags,
                     "last_active": self.metadata.last_active.isoformat(),
                     "created_at": self.metadata.created_at.isoformat(),
                 },
@@ -253,6 +274,10 @@ class TherapySessionMemory:
                     "probed_dimensions": self.metadata.probed_dimensions,
                     "scale_state": self.metadata.scale_state,
                     "scale_history": self.metadata.scale_history,
+                    "phase": self.metadata.phase,
+                    "family_members": self.metadata.family_members,
+                    "working_hypothesis": self.metadata.working_hypothesis,
+                    "scid_flags": self.metadata.scid_flags,
                 },
             )
             # 同步 Redis
@@ -287,6 +312,10 @@ class TherapySessionMemory:
                     "probed_dimensions": self.metadata.probed_dimensions,
                     "scale_state": self.metadata.scale_state,
                     "scale_history": self.metadata.scale_history,
+                    "phase": self.metadata.phase,
+                    "family_members": self.metadata.family_members,
+                    "working_hypothesis": self.metadata.working_hypothesis,
+                    "scid_flags": self.metadata.scid_flags,
                     "last_active": self.metadata.last_active.isoformat(),
                     "created_at": self.metadata.created_at.isoformat(),
                 },
@@ -312,6 +341,10 @@ class TherapySessionMemory:
                     "probed_dimensions": self.metadata.probed_dimensions,
                     "scale_state": self.metadata.scale_state,
                     "scale_history": self.metadata.scale_history,
+                    "phase": self.metadata.phase,
+                    "family_members": self.metadata.family_members,
+                    "working_hypothesis": self.metadata.working_hypothesis,
+                    "scid_flags": self.metadata.scid_flags,
                 },
             )
         except Exception as e:
@@ -478,6 +511,66 @@ class TherapySessionMemory:
         """获取已探测的临床维度列表。"""
         return list(self.metadata.probed_dimensions)
 
+    # ── 医生模式便利方法 ──────────────────────────────────────
+
+    def update_phase(self, phase: str) -> None:
+        """更新 session 阶段并持久化。"""
+        valid_phases = {"check_in", "explore", "interpret", "intervene"}
+        if phase not in valid_phases:
+            logger.warning("无效的 phase: %s，使用 check_in", phase)
+            phase = "check_in"
+        self.metadata.phase = phase
+        self._save_to_database()
+
+    def update_hypothesis(self, hypothesis: Optional[str]) -> None:
+        """更新工作假设并持久化。传 None 表示清除。"""
+        self.metadata.working_hypothesis = hypothesis
+        self._save_to_database()
+
+    def add_family_member(self, role: str, label: str = "") -> None:
+        """记录一个家庭成员。role 如 '妈妈'、'爸爸'、'孩子'。"""
+        for m in self.metadata.family_members:
+            if m.get("role") == role:
+                if label:
+                    m["label"] = label
+                return
+        self.metadata.family_members.append(
+            {"role": role, "label": label, "noted_at": datetime.now().isoformat()}
+        )
+        self._save_to_database()
+
+    def update_scid_flags(self, flags: Dict[str, Any]) -> None:
+        """更新 SCID 追踪数据并持久化（合并模式）。"""
+        existing = dict(self.metadata.scid_flags)
+        for disorder, data in flags.items():
+            if disorder in existing:
+                existing_criteria = set(existing[disorder].get("criteria_met", []))
+                new_criteria = set(data.get("criteria_met", []))
+                merged = sorted(existing_criteria | new_criteria)
+                existing[disorder]["criteria_met"] = merged
+                existing[disorder]["count"] = len(merged)
+            else:
+                criteria = data.get("criteria_met", [])
+                existing[disorder] = {
+                    "criteria_met": criteria,
+                    "count": len(criteria),
+                }
+        self.metadata.scid_flags = existing
+        self._save_to_database()
+
+    def get_assessor_context(self) -> str:
+        """构建注入 prompt 的评估上下文文本。"""
+        parts = [f"**当前会话阶段**：{self.metadata.phase}"]
+        if self.metadata.working_hypothesis:
+            parts.append(f"**当前工作假设**：{self.metadata.working_hypothesis}")
+        if self.metadata.family_members:
+            members_text = "、".join(
+                f"{m['role']}" + (f"（{m['label']}）" if m.get("label") else "")
+                for m in self.metadata.family_members
+            )
+            parts.append(f"**已识别家庭成员**：{members_text}")
+        return "\n".join(parts)
+
     def get_context_summary(self) -> str:
         """获取上下文摘要。"""
         parts = []
@@ -521,14 +614,20 @@ class TherapySessionMemory:
 
 # ── SessionManager ────────────────────────────────────────────────
 
+# 进程内内存 session 缓存（无 Redis/MySQL 环境下的跨轮状态 fallback）。
+# Gap #19 移除的 _sessions dict 在此以"仅兜底"身份回归：
+# 有可用存储时走 Redis/MySQL，存储不可用时才复用内存实例，
+# 保证 USE_DATABASE=false 或存储故障场景下多轮状态不丢失。
+_memory_sessions: Dict[str, "TherapySessionMemory"] = {}
+
+
 class SessionManager:
     """
     会话管理器
 
     Gap #19 重构要点：
-    - 去除 _sessions 类级别 dict：不再缓存 TherapySessionMemory 实例
     - create_session() → 写 MySQL + Redis，只返回 session_id
-    - get_session() → 每次创建新 TherapySessionMemory（数据来自 Redis/MySQL）
+    - get_session() → 优先 Redis/MySQL；存储不可用时回退进程内内存缓存
     - 会话发现走 Redis SET 索引 + MySQL 回退
     - 会话过期由 Redis TTL 管理，不再有 cleanup_inactive_sessions()
     """
@@ -552,6 +651,10 @@ class SessionManager:
                         "key_topics": [],
                         "probed_dimensions": [],
                         "scale_history": [],
+                        "phase": "check_in",
+                        "family_members": [],
+                        "working_hypothesis": None,
+                        "scid_flags": {},
                     },
                 )
             except Exception as e:
@@ -572,6 +675,10 @@ class SessionManager:
                     "probed_dimensions": [],
                     "scale_state": None,
                     "scale_history": [],
+                    "phase": "check_in",
+                    "family_members": [],
+                    "working_hypothesis": None,
+                    "scid_flags": {},
                     "last_active": datetime.now().isoformat(),
                     "created_at": datetime.now().isoformat(),
                 },
@@ -607,18 +714,28 @@ class SessionManager:
             except Exception as e:
                 logger.warning("get_session DB error: %s", e)
 
-        # 会话不存在或未使用 DB，创建新会话
+        # 会话不存在或未使用 DB：回退进程内内存缓存
+        # （保证无 Redis/MySQL 环境下多轮状态跨轮共享）
+        cached = _memory_sessions.get(session_id)
+        if cached is not None:
+            _verify_session_ownership(cached, user_id)
+            return cached
+
         session = TherapySessionMemory(
             session_id=session_id,
             user_id=user_id,
             use_database=use_db,
             **{k: v for k, v in kwargs.items() if k != "use_database"},
         )
+        _memory_sessions[session_id] = session
         return session
 
     @classmethod
     def remove_session(cls, session_id: str) -> None:
-        """删除会话（Redis + MySQL）。"""
+        """删除会话（Redis + MySQL + 内存缓存）。"""
+        # 内存缓存
+        _memory_sessions.pop(session_id, None)
+
         # Redis
         try:
             from core.memory.redis_storage import delete_session as redis_delete

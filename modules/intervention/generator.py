@@ -9,6 +9,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda
 
+from config.settings import settings
 from modules.prompt_guard import wrap_user_text, INSTRUCTION_HIERARCHY_SUFFIX
 from schemas.contracts import InterventionRequest, InterventionResult
 
@@ -322,6 +323,58 @@ class InterventionReplyGenerator:
                 "不要再探测任何维度，只需共情陪伴，让对方感到被理解。"
             )
 
+    # ── 医生模式 helper ──────────────────────────────────────
+
+    def _get_doctor_prompt(self, route: str) -> Optional[str]:
+        """DOCTOR_MODE=true 时返回对应路由的周医生 prompt 模板。"""
+        if not settings.DOCTOR_MODE:
+            return None
+        try:
+            from modules.intervention.persona import get_doctor_prompt
+            return get_doctor_prompt(route, settings.DOCTOR_PERSONA)
+        except Exception as e:
+            logger.warning("加载 doctor prompt 失败: %s，回退原 prompt", e)
+            return None
+
+    def _build_assessor_context(self, session_id: Optional[str]) -> str:
+        """从 session 构建评估上下文文本，注入 prompt。"""
+        if not session_id:
+            return "（无评估上下文，这是第一轮对话）"
+        try:
+            session = self._get_session_store().get_session(session_id)
+            return session.get_assessor_context()
+        except Exception:
+            return "（无法获取评估上下文）"
+
+    def _get_format_kwargs(
+        self, req: InterventionRequest, knowledge_text: str = ""
+    ) -> Dict[str, Any]:
+        """构建 prompt 格式化参数。DOCTOR_MODE 和普通模式统一入口。"""
+        emotion = req.emotion or {}
+        kw: Dict[str, Any] = {
+            "primary_emotion": emotion.get("primary_emotion", "neutral"),
+            "intensity": emotion.get("intensity", 0.5),
+            "risk": emotion.get("risk", 0.0),
+            "conversation_history": self._format_history(req.session_id),
+            "probed_dimensions_note": self._get_probed_dimensions_text(req.session_id),
+        }
+        if settings.DOCTOR_MODE:
+            kw["assessor_context"] = self._build_assessor_context(req.session_id)
+            kw["phase"] = self._get_session_phase(req.session_id)
+        if knowledge_text:
+            kw["retrieved_knowledge"] = knowledge_text
+        return kw
+
+    def _get_session_phase(self, session_id: Optional[str]) -> str:
+        """读取 session 的当前阶段。"""
+        if not session_id:
+            return "check_in"
+        try:
+            session = self._get_session_store().get_session(session_id)
+            return session.metadata.phase
+        except Exception:
+            return "check_in"
+
     def _save_probed_dimension(self, session_id: Optional[str], reply_text: str) -> None:
         """检测本轮回复探测了哪个维度并持久化。"""
         if not session_id:
@@ -350,14 +403,12 @@ class InterventionReplyGenerator:
 
     async def astream_comfort(self, req: InterventionRequest) -> AsyncIterator[str]:
         """安抚路由流式生成：绕过 LCEL，直接调用 self._llm.astream()"""
-        emotion = req.emotion or {}
-        system_text = COMFORT_SYSTEM_PROMPT.format(
-            primary_emotion=emotion.get("primary_emotion", "neutral"),
-            intensity=emotion.get("intensity", 0.5),
-            risk=emotion.get("risk", 0.0),
-            conversation_history=self._format_history(req.session_id),
-            probed_dimensions_note=self._get_probed_dimensions_text(req.session_id),
-        )
+        doctor_prompt = self._get_doctor_prompt("comfort")
+        format_kw = self._get_format_kwargs(req)
+        if doctor_prompt:
+            system_text = doctor_prompt.format(**format_kw)
+        else:
+            system_text = COMFORT_SYSTEM_PROMPT.format(**format_kw)
         system_text = system_text + INSTRUCTION_HIERARCHY_SUFFIX
         wrapped = wrap_user_text(req.user_text)
 
@@ -374,14 +425,12 @@ class InterventionReplyGenerator:
 
     async def astream_general(self, req: InterventionRequest) -> AsyncIterator[str]:
         """通用路由流式生成"""
-        emotion = req.emotion or {}
-        system_text = GENERAL_SYSTEM_PROMPT.format(
-            primary_emotion=emotion.get("primary_emotion", "neutral"),
-            intensity=emotion.get("intensity", 0.5),
-            risk=emotion.get("risk", 0.0),
-            conversation_history=self._format_history(req.session_id),
-            probed_dimensions_note=self._get_probed_dimensions_text(req.session_id),
-        )
+        doctor_prompt = self._get_doctor_prompt("general")
+        format_kw = self._get_format_kwargs(req)
+        if doctor_prompt:
+            system_text = doctor_prompt.format(**format_kw)
+        else:
+            system_text = GENERAL_SYSTEM_PROMPT.format(**format_kw)
         system_text = system_text + INSTRUCTION_HIERARCHY_SUFFIX
         wrapped = wrap_user_text(req.user_text)
 
@@ -413,14 +462,12 @@ class InterventionReplyGenerator:
             docs = self._retriever.retrieve(query, top_k=3)
         knowledge_text = "\n".join(f"- {d}" for d in docs) if docs else "（知识库暂无相关内容）"
 
-        system_text = KNOWLEDGE_SYSTEM_PROMPT.format(
-            primary_emotion=emotion.get("primary_emotion", "neutral"),
-            intensity=emotion.get("intensity", 0.5),
-            risk=emotion.get("risk", 0.0),
-            retrieved_knowledge=knowledge_text,
-            conversation_history=self._format_history(req.session_id),
-            probed_dimensions_note=self._get_probed_dimensions_text(req.session_id),
-        )
+        doctor_prompt = self._get_doctor_prompt("knowledge")
+        format_kw = self._get_format_kwargs(req, knowledge_text=knowledge_text)
+        if doctor_prompt:
+            system_text = doctor_prompt.format(**format_kw)
+        else:
+            system_text = KNOWLEDGE_SYSTEM_PROMPT.format(**format_kw)
         system_text = system_text + INSTRUCTION_HIERARCHY_SUFFIX
         wrapped = wrap_user_text(req.user_text)
 
@@ -438,39 +485,39 @@ class InterventionReplyGenerator:
     # ── generate methods ────────────────────────────────────
 
     def generate_comfort(self, req: InterventionRequest) -> InterventionResult:
-        emotion = req.emotion or {}
-        system_text = COMFORT_SYSTEM_PROMPT.format(
-            primary_emotion=emotion.get("primary_emotion", "neutral"),
-            intensity=emotion.get("intensity", 0.5),
-            risk=emotion.get("risk", 0.0),
-            conversation_history=self._format_history(req.session_id),
-            probed_dimensions_note=self._get_probed_dimensions_text(req.session_id),
-        )
+        doctor_prompt = self._get_doctor_prompt("comfort")
+        format_kw = self._get_format_kwargs(req)
+        if doctor_prompt:
+            system_text = doctor_prompt.format(**format_kw)
+            meta = {"implementation": "llm_comfort_doctor"}
+        else:
+            system_text = COMFORT_SYSTEM_PROMPT.format(**format_kw)
+            meta = {"implementation": "llm_comfort"}
         reply = self._invoke_chain(system_text, req.user_text)
         self._save_turn(req.session_id, req.user_text, reply)
         self._save_probed_dimension(req.session_id, reply)
         return InterventionResult(
             reply=reply, empathy="", suggestion="", action_items=[],
             chain_of_thought=None, emergency_triggered=False,
-            meta={"implementation": "llm_comfort"},
+            meta=meta,
         )
 
     def generate_general(self, req: InterventionRequest) -> InterventionResult:
-        emotion = req.emotion or {}
-        system_text = GENERAL_SYSTEM_PROMPT.format(
-            primary_emotion=emotion.get("primary_emotion", "neutral"),
-            intensity=emotion.get("intensity", 0.5),
-            risk=emotion.get("risk", 0.0),
-            conversation_history=self._format_history(req.session_id),
-            probed_dimensions_note=self._get_probed_dimensions_text(req.session_id),
-        )
+        doctor_prompt = self._get_doctor_prompt("general")
+        format_kw = self._get_format_kwargs(req)
+        if doctor_prompt:
+            system_text = doctor_prompt.format(**format_kw)
+            meta = {"implementation": "llm_general_doctor"}
+        else:
+            system_text = GENERAL_SYSTEM_PROMPT.format(**format_kw)
+            meta = {"implementation": "llm_general"}
         reply = self._invoke_chain(system_text, req.user_text)
         self._save_turn(req.session_id, req.user_text, reply)
         self._save_probed_dimension(req.session_id, reply)
         return InterventionResult(
             reply=reply, empathy="", suggestion="", action_items=[],
             chain_of_thought=None, emergency_triggered=False,
-            meta={"implementation": "llm_general"},
+            meta=meta,
         )
 
     def generate_knowledge(self, req: InterventionRequest, enriched_query: str = None) -> InterventionResult:
@@ -488,14 +535,14 @@ class InterventionReplyGenerator:
             docs = self._retriever.retrieve(query, top_k=3)
         knowledge_text = "\n".join(f"- {d}" for d in docs) if docs else "（知识库暂无相关内容）"
 
-        system_text = KNOWLEDGE_SYSTEM_PROMPT.format(
-            primary_emotion=emotion.get("primary_emotion", "neutral"),
-            intensity=emotion.get("intensity", 0.5),
-            risk=emotion.get("risk", 0.0),
-            retrieved_knowledge=knowledge_text,
-            conversation_history=self._format_history(req.session_id),
-            probed_dimensions_note=self._get_probed_dimensions_text(req.session_id),
-        )
+        doctor_prompt = self._get_doctor_prompt("knowledge")
+        format_kw = self._get_format_kwargs(req, knowledge_text=knowledge_text)
+        if doctor_prompt:
+            system_text = doctor_prompt.format(**format_kw)
+            meta = {"implementation": "llm_knowledge_doctor", "retrieved_docs": len(docs)}
+        else:
+            system_text = KNOWLEDGE_SYSTEM_PROMPT.format(**format_kw)
+            meta = {"implementation": "llm_knowledge", "retrieved_docs": len(docs)}
         reply = self._invoke_chain(system_text, req.user_text)
         self._save_turn(req.session_id, req.user_text, reply)
         self._save_probed_dimension(req.session_id, reply)
@@ -503,5 +550,5 @@ class InterventionReplyGenerator:
             reply=reply, empathy="",
             suggestion=f"知识来源：基于检索到的 {len(docs)} 条心理学参考资料",
             action_items=[], chain_of_thought=None, emergency_triggered=False,
-            meta={"implementation": "llm_knowledge", "retrieved_docs": len(docs)},
+            meta=meta,
         )

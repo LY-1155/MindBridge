@@ -84,3 +84,15 @@ nice_*.html
 *.html.html
 GV7T4ZM*.html
 modules/safety/siglip2-nsfw/
+
+# ── 隐私/版权数据（不提交）────────────────────────
+# 真实患者访谈数据（含诊断信息，敏感）
+心理医生访谈数据/
+# DSM-5 版权 PDF（z-library 下载）
+DSM-5*.pdf
+# Chroma 测试残留
+data/knowledge/_test_persist/
+
+# Claude 会话记忆（非项目代码）
+memory/
+MEMORY.md

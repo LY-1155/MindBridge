@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import AsyncIterator
+
 from schemas.contracts import InterventionRequest, InterventionResult
 
 
 class MockInterventionService:
     """供 MOCK_INTERVENTION=true 时使用；契约测试与 UI 联调不应依赖真实生成逻辑。"""
+
+    _FIXED_REPLY = "[mock-general] 收到，我们会陪伴你一步步处理。"
 
     def intervene(self, req: InterventionRequest) -> InterventionResult:
         route = (req.route or {}).get("route") or "comfort"
@@ -19,3 +23,8 @@ class MockInterventionService:
             emergency_triggered=route == "crisis",
             meta={"implementation": "mock"},
         )
+
+    async def astream_intervene(self, req: InterventionRequest) -> AsyncIterator[str]:
+        """流式版：将固定回复逐字符 yield。"""
+        for char in self._FIXED_REPLY:
+            yield char

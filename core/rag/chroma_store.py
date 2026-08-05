@@ -22,8 +22,14 @@ class ChromaStore:
         collection_name: str,
         embedding_fn,
         persist_dir: Optional[str] = None,
+        use_http: bool = False,
+        http_host: str = "localhost",
+        http_port: int = 8001,
     ):
-        if persist_dir:
+        if use_http:
+            # Docker/server 模式 — 绕过 Windows PersistentClient native 崩溃
+            self._client = chromadb.HttpClient(host=http_host, port=http_port)
+        elif persist_dir:
             self._client = chromadb.PersistentClient(path=persist_dir)
         else:
             self._client = chromadb.Client()

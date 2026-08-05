@@ -775,6 +775,29 @@ body::after {
     50%      { box-shadow: 0 0 0 8px rgba(212, 115, 106, 0); }
 }
 
+/* 按住说话按钮 */
+.ptt-btn .icon .svg-icon {
+    width: 18px;
+    height: 18px;
+}
+
+/* 实时语音字幕 */
+.ptt-subtitle {
+    display: none;
+    flex: 1;
+    min-width: 0;
+    padding: 4px 12px;
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 32px;
+}
+.ptt-subtitle:not(:empty) {
+    display: block;
+}
+
 .input-wrapper {
     display: flex;
     gap: 8px;

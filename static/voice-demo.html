@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>语音对话 Demo — PRISM</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f172a; color: #e2e8f0;
+      display: flex; flex-direction: column; align-items: center;
+      min-height: 100vh; padding: 2rem 1rem;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .subtitle-text { color: #94a3b8; font-size: 0.875rem; margin-bottom: 2rem; }
+
+    .voice-area {
+      display: flex; flex-direction: column; align-items: center; gap: 1.5rem;
+      width: 100%; max-width: 400px;
+    }
+
+    /* 字幕区 */
+    #subtitle {
+      width: 100%; min-height: 3rem; padding: 1rem;
+      background: #1e293b; border-radius: 12px;
+      font-size: 1.125rem; text-align: center; color: #f1f5f9;
+      white-space: pre-wrap; word-break: break-word;
+      transition: background 0.2s;
+    }
+    #subtitle.active { background: #334155; }
+
+    /* 情绪标签 */
+    #emotion-badge {
+      display: none; padding: 0.25rem 0.75rem;
+      background: #7c3aed; border-radius: 9999px;
+      font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+    }
+
+    /* 录音按钮 */
+    .talk-btn {
+      width: 120px; height: 120px; border-radius: 50%;
+      border: 4px solid #475569; background: #1e293b;
+      color: #e2e8f0; font-size: 1rem; font-weight: 600;
+      cursor: pointer; user-select: none;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .talk-btn:hover { border-color: #6366f1; }
+    .talk-btn:active, .talk-btn.recording {
+      background: #ef4444; border-color: #ef4444;
+      transform: scale(1.08); box-shadow: 0 0 32px rgba(239,68,68,0.4);
+    }
+
+    .hint { color: #64748b; font-size: 0.8rem; }
+
+    /* 连接状态 */
+    #status-dot {
+      width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+      background: #ef4444; margin-right: 0.25rem;
+    }
+    #status-dot.connected { background: #22c55e; }
+
+    /* 登录区 */
+    .login-area {
+      margin-bottom: 1.5rem; display: flex; gap: 0.5rem;
+    }
+    .login-area input {
+      padding: 0.5rem 0.75rem; border-radius: 8px;
+      border: 1px solid #475569; background: #1e293b; color: #e2e8f0;
+      font-size: 0.875rem;
+    }
+    .login-area button {
+      padding: 0.5rem 1rem; border-radius: 8px;
+      background: #6366f1; color: white; border: none; cursor: pointer;
+      font-size: 0.875rem; font-weight: 600;
+    }
+    .login-area button:hover { background: #4f46e5; }
+  </style>
+</head>
+<body>
+
+  <h1>🎤 PRISM 语音对话</h1>
+  <p class="subtitle-text">
+    <span id="status-dot"></span>
+    <span id="connection-status">未连接</span>
+  </p>
+
+  <div class="login-area">
+    <input id="email" type="email" placeholder="邮箱" value="test@example.com">
+    <input id="password" type="password" placeholder="密码" value="">
+    <button id="btn-login" onclick="doLogin()">登录</button>
+  </div>
+
+  <div class="voice-area">
+    <span id="emotion-badge"></span>
+    <div id="subtitle">按住下方按钮开始说话</div>
+    <button id="btn-talk" class="talk-btn">按住<br>说话</button>
+    <p class="hint">按住按钮录音 · 松开发送 · 滑出取消</p>
+  </div>
+
+  <script src="/static/js/voice_chat.js"></script>
+  <script>
+    let accessToken = "";
+
+    async function doLogin() {
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+      try {
+        const resp = await fetch("/api/v1/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await resp.json();
+        if (data.access_token) {
+          accessToken = data.access_token;
+          document.getElementById("status-dot").classList.add("connected");
+          document.getElementById("connection-status").textContent = "已登录";
+          VoiceChat.init({
+            token: accessToken,
+            sessionId: null,
+            buttonId: "btn-talk",
+            subtitleId: "subtitle",
+            badgeId: "emotion-badge",
+          });
+        } else {
+          alert("登录失败: " + JSON.stringify(data));
+        }
+      } catch (e) {
+        alert("登录失败: " + e.message);
+      }
+    }
+  </script>
+</body>
+</html>
