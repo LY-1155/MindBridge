@@ -40,6 +40,12 @@ PRISM 原有的四阶段管线（Safety → Emotion → Router → Intervention�
 | `tests/test_family_assessor.py` | 新建 | 16 个单元测试 |
 | `tests/test_scid_tracker.py` | 新建 | 17 个单元测试 |
 | `scripts/verify_doctor_mode.py` | 新建 | 真实 LLM 验证脚本 |
+| `core/privacy/desensitize.py` | 新建 | 访谈语料脱敏（规则去 PII） |
+| `scripts/build_zhou_style_index.py` | 新建 | 脱敏+蒸馏→建"情景→回应"风格索引 |
+| `modules/intervention/rag/zhou_style.py` | 新建 | 风格参考检索器（运行时注入 prompt） |
+| `tests/test_desensitize.py` | 新建 | 15 个脱敏单元测试 |
+| `tests/test_zhou_style.py` | 新建 | 8 个检索器单元测试 |
+| `scripts/verify_zhou_style.py` | 新建 | 检索质量 + 脱敏效果验证 |
 
 ## 四、怎么启用
 
@@ -61,8 +67,12 @@ DOCTOR_MODE=true
 
 ## 五、验证结果
 
-- **单元测试**：33/33 通过
+- **单元测试**：33/33 通过（家庭评估 + SCID 追踪）
+- **脱敏 + 风格检索**：25/25 通过（`test_desensitize` 17 + `test_zhou_style` 8）
+- **干预服务回归**：26/26 通过（`test_intervention_service`）
 - **真实 LLM 验证**（qwen3.7-max，4 轮家庭场景对话）：周医生 persona 生效、家庭成员识别生效、SCID 追踪生效、跨轮状态累积生效
+- **风格库检索验证**（`scripts/verify_zhou_style.py`）：6 个典型情景（拒学/学业压力/分手/失眠/轻生/父母冲突）命中相关且含周医生问法
+- **脱敏效果抽查**：200 轮发言 0 处 PII 残留；索引 7548 条全部通过二次扫描
 - 对话样例见 [验证记录.md](验证记录.md)
 
 ## 六、数据流
@@ -77,9 +87,41 @@ DOCTOR_MODE=true
               └─ Generator: 周医生prompt + assessor上下文 → LLM回复
 ```
 
-## 七、后续方向
+## 七、周医生风格参考库（真实对话风格检索）
+
+persona 提示词是访谈数据的一次性手工蒸馏。**风格参考库**让数据在运行时持续被使用：
+
+**流程**：960 份访谈（26 万轮）→ 脱敏（去姓名/电话/机构名/地名/年份）→ 蒸馏成 `(患者发言 → 周医生回应)` 配对 → 嵌入建 `zhou_style` 索引 → 对话时按当前用户输入检索最相似的 3 条，注入 prompt。
+
+```
+原始访谈 ──脱敏──▶ 脱敏版 ──蒸馏──▶ (human→doctor) 样本 ──嵌入──▶ Chroma zhou_style
+(960份/含PII)    (core/privacy)     (build_zhou_style)           (data/knowledge/
+                                                                chroma_zhou_style)
+                                                                    │ 运行时
+                                    用户输入 → 检索 top 3 最像的时刻 → 注入 prompt
+                                    "当来访者说「孩子不上学」，周医生会回「……」"
+```
+
+**隐私**：
+- 原始访谈（含真实患者信息）永不进入索引，且已加入 `.gitignore` 不入库
+- 建索引前逐轮脱敏（`core/privacy/desensitize.py`，15 个单测覆盖）
+- 注入 prompt 时附带"已脱敏虚构化，仅参考问法"声明，LLM 只学风格、不照搬个案
+
+**运行**：
+```powershell
+# 建索引（默认 8000 样本 ≈ 30 分钟；全量 --max-samples 0）
+& "D:\Anaconda\envs\emotion\python.exe" scripts/build_zhou_style_index.py
+# 验证检索质量 + 脱敏效果
+& "D:\Anaconda\envs\emotion\python.exe" scripts/verify_zhou_style.py --privacy
+```
+
+**降级**：索引未建 / 加载失败时，检索器静默禁用，返回空串，不阻断对话。
+
+## 八、后续方向
 
 - [ ] Phase 2：危机协议增强（从周医生 crisis protocol 提取三选一框架、系统筛查清单）
 - [ ] 更多 session 类型模式（首次访谈 / 家庭 / 个体 / 家长单独）
 - [ ] 假设生成时机优化（当前绑定 explore 阶段，可在 check_in 后期提前）
 - [ ] `USE_DATABASE=true` 启用持久化，session 状态跨重启保留
+- [ ] 风格索引全量化（当前默认 8000 样本，数据可支持 ~30000）
+- [ ] 蒸馏粒度优化（更长的 doctor 回应 → 保留完整干预手法）

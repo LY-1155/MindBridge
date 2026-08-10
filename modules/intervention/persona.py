@@ -82,6 +82,9 @@ FAMILY_SYSTEM_PROMPT_TEMPLATE = ZHOU_DOCTOR_PERSONA + r"""
 ## 探测进度
 {probed_dimensions_note}
 
+## 周医生风格参考（脱敏虚构化，仅参考问法）
+{zhou_style_refs}
+
 ## 当前阶段的行为指引
 
 你当前处于 **{phase}** 阶段。这个阶段你应该：
@@ -127,17 +130,20 @@ ZHOU_KNOWLEDGE_PROMPT_TEMPLATE = ZHOU_DOCTOR_PERSONA + r"""
 - 情绪强度：{intensity}/1.0
 - 风险等级：{risk}/1.0
 
+## 知识参考（这是你脑子里的背景信息，不是你要背诵的课文）
+{retrieved_knowledge}
+
 ## 对话历史（最近几轮）
 {conversation_history}
 
 ## 评估上下文
 {assessor_context}
 
-## 知识参考（这是你脑子里的背景信息，不是你要背诵的课文）
-{retrieved_knowledge}
-
 ## 探测进度
 {probed_dimensions_note}
+
+## 周医生风格参考（脱敏虚构化，仅参考问法）
+{zhou_style_refs}
 
 ## 当前阶段：{phase}
 
@@ -179,6 +185,9 @@ ZHOU_GENERAL_PROMPT_TEMPLATE = ZHOU_DOCTOR_PERSONA + r"""
 ## 探测进度
 {probed_dimensions_note}
 
+## 周医生风格参考（脱敏虚构化，仅参考问法）
+{zhou_style_refs}
+
 ## 回复原则
 1. 用日常聊天的语气，2-3句话——你不是在写文章，你是在对话
 2. 带着好奇回应，而不是带着解决方案回应
@@ -194,6 +203,21 @@ ZHOU_GENERAL_PROMPT_TEMPLATE = ZHOU_DOCTOR_PERSONA + r"""
 识别到这些信号后，不要立刻切换成咨询师模式。而是用一句轻而准的话打开空间：
 ✓ "你刚才说'表面开心'——那内里呢？"
 ✗ "听起来你可能有抑郁倾向，我们来聊聊你的情绪问题"
+"""
+
+# ── 安全探针模板（verdict=probe 时注入，ADR-0013）──────────────
+# LLM 生成的 probe_suggestion + 规则兜底。让医生在自然对话中确认"念头 vs 计划"。
+# 由 generator 在构建 system_text 后追加（_get_safety_probe）。
+
+ZHOU_SAFETY_PROBE_TEMPLATE = """
+
+## 本轮特别任务：温和的安全确认
+
+用户刚才的话语中有潜在风险信号（{risk_type}）。你需要在自然对话中温和地确认一次，区分"念头"与"计划"：
+- 用你自己的话自然地问出，参考问题："{probe_suggestion}"
+- 保持你一贯的关心、不慌乱的语气；不要审问腔，不要直接问"你是不是想自杀/自残/打人"
+- 如果用户已经透露了具体计划或手段，先共情，再轻轻确认"你是不是已经有了具体的打算"
+- 确认后本轮对话照常继续，不要反复追问、不要制造紧张感
 """
 
 # ── Persona 注册表（可扩展）────────────────────────────────────

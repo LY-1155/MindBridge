@@ -336,6 +336,28 @@ class InterventionReplyGenerator:
             logger.warning("加载 doctor prompt 失败: %s，回退原 prompt", e)
             return None
 
+    def _get_safety_probe(self, req: InterventionRequest) -> str:
+        """verdict==probe 时构建安全探针指令段，否则空串。
+
+        探针由语义安全评估器生成（LLM probe_suggestion），规则提供兜底模板。
+        医生以唯一声音自然问出，不打断 persona（ADR-0013 2-agent 边界）。
+        """
+        verdict_dict = req.safety_verdict or {}
+        if verdict_dict.get("verdict") != "probe":
+            return ""
+        suggestion = verdict_dict.get("probe_suggestion")
+        if not suggestion:
+            from modules.assessment.safety_judge import FALLBACK_PROBE
+            suggestion = FALLBACK_PROBE.get(
+                verdict_dict.get("risk_type", "general"),
+                FALLBACK_PROBE["general"],
+            )
+        from modules.intervention.persona import ZHOU_SAFETY_PROBE_TEMPLATE
+        return ZHOU_SAFETY_PROBE_TEMPLATE.format(
+            risk_type=verdict_dict.get("risk_type", "general"),
+            probe_suggestion=suggestion,
+        )
+
     def _build_assessor_context(self, session_id: Optional[str]) -> str:
         """从 session 构建评估上下文文本，注入 prompt。"""
         if not session_id:
@@ -361,9 +383,26 @@ class InterventionReplyGenerator:
         if settings.DOCTOR_MODE:
             kw["assessor_context"] = self._build_assessor_context(req.session_id)
             kw["phase"] = self._get_session_phase(req.session_id)
+            kw["zhou_style_refs"] = self._get_zhou_style_refs(req.user_text)
         if knowledge_text:
             kw["retrieved_knowledge"] = knowledge_text
         return kw
+
+    def _get_zhou_style_refs(self, user_text: str) -> str:
+        """DOCTOR_MODE 下检索周医生风格参考，格式化为 prompt 注入段。
+
+        索引未建 / 检索失败 → 返回空串，安全降级（模板占位符替换为空）。
+        """
+        if not user_text:
+            return ""
+        try:
+            from modules.intervention.rag.zhou_style import get_zhou_style_retriever
+            retriever = get_zhou_style_retriever()
+            hits = retriever.retrieve(user_text, top_k=3)
+            return retriever.format_for_prompt(hits, max_items=2)
+        except Exception:
+            logger.warning("ZhouStyle 风格参考获取失败，跳过", exc_info=True)
+            return ""
 
     def _get_session_phase(self, session_id: Optional[str]) -> str:
         """读取 session 的当前阶段。"""
@@ -409,7 +448,7 @@ class InterventionReplyGenerator:
             system_text = doctor_prompt.format(**format_kw)
         else:
             system_text = COMFORT_SYSTEM_PROMPT.format(**format_kw)
-        system_text = system_text + INSTRUCTION_HIERARCHY_SUFFIX
+        system_text = system_text + self._get_safety_probe(req) + INSTRUCTION_HIERARCHY_SUFFIX
         wrapped = wrap_user_text(req.user_text)
 
         messages = [SystemMessage(content=system_text), HumanMessage(content=wrapped)]
@@ -431,7 +470,7 @@ class InterventionReplyGenerator:
             system_text = doctor_prompt.format(**format_kw)
         else:
             system_text = GENERAL_SYSTEM_PROMPT.format(**format_kw)
-        system_text = system_text + INSTRUCTION_HIERARCHY_SUFFIX
+        system_text = system_text + self._get_safety_probe(req) + INSTRUCTION_HIERARCHY_SUFFIX
         wrapped = wrap_user_text(req.user_text)
 
         messages = [SystemMessage(content=system_text), HumanMessage(content=wrapped)]
@@ -468,7 +507,7 @@ class InterventionReplyGenerator:
             system_text = doctor_prompt.format(**format_kw)
         else:
             system_text = KNOWLEDGE_SYSTEM_PROMPT.format(**format_kw)
-        system_text = system_text + INSTRUCTION_HIERARCHY_SUFFIX
+        system_text = system_text + self._get_safety_probe(req) + INSTRUCTION_HIERARCHY_SUFFIX
         wrapped = wrap_user_text(req.user_text)
 
         messages = [SystemMessage(content=system_text), HumanMessage(content=wrapped)]
@@ -493,6 +532,7 @@ class InterventionReplyGenerator:
         else:
             system_text = COMFORT_SYSTEM_PROMPT.format(**format_kw)
             meta = {"implementation": "llm_comfort"}
+        system_text = system_text + self._get_safety_probe(req)
         reply = self._invoke_chain(system_text, req.user_text)
         self._save_turn(req.session_id, req.user_text, reply)
         self._save_probed_dimension(req.session_id, reply)
@@ -511,6 +551,7 @@ class InterventionReplyGenerator:
         else:
             system_text = GENERAL_SYSTEM_PROMPT.format(**format_kw)
             meta = {"implementation": "llm_general"}
+        system_text = system_text + self._get_safety_probe(req)
         reply = self._invoke_chain(system_text, req.user_text)
         self._save_turn(req.session_id, req.user_text, reply)
         self._save_probed_dimension(req.session_id, reply)
@@ -543,6 +584,7 @@ class InterventionReplyGenerator:
         else:
             system_text = KNOWLEDGE_SYSTEM_PROMPT.format(**format_kw)
             meta = {"implementation": "llm_knowledge", "retrieved_docs": len(docs)}
+        system_text = system_text + self._get_safety_probe(req)
         reply = self._invoke_chain(system_text, req.user_text)
         self._save_turn(req.session_id, req.user_text, reply)
         self._save_probed_dimension(req.session_id, reply)
