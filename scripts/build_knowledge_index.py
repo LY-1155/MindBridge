@@ -114,7 +114,7 @@ def build_chroma(entries: List[dict], backend: str = "api", dry_run: bool = Fals
             for e in batch
         ]
 
-        store.add(ids=ids, texts=texts, metadatas=metadatas)
+        store.upsert(ids=ids, texts=texts, metadatas=metadatas)
         pct = min(100, int((i + len(batch)) / len(entries) * 100))
         print(f"\r  进度: {pct}% ({min(i + len(batch), len(entries))}/{len(entries)})", end="", flush=True)
         time.sleep(0.1)

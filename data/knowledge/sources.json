@@ -21,7 +21,7 @@
       "format": "jsonl",
       "deidentify": false,
       "enabled": true,
-      "note": "9 个公有类别：disorder_knowledge / coping_strategies / medication_knowledge / sleep_health / trauma_and_stress / grief_and_loss / relationships / psychology_basics / diagnostic_framework。diagnostic_framework.jsonl 为 SCID-5-CV 结构化诊断框架（操作型知识，非科普）"
+      "note": "10 个公有类别：disorder_knowledge / coping_strategies / medication_knowledge / sleep_health / trauma_and_stress / grief_and_loss / relationships / psychology_basics / diagnostic_framework / adolescent_family。diagnostic_framework.jsonl 为 SCID-5-CV 结构化诊断框架（操作型知识，非科普）；adolescent_family.jsonl 为青少年家庭议题库（厌学/霸凌/自伤/教养方式等场景指南）"
     },
     {
       "id": "external_api",
@@ -46,7 +46,8 @@
       "grief_and_loss",
       "relationships",
       "psychology_basics",
-      "diagnostic_framework"
+      "diagnostic_framework",
+      "adolescent_family"
     ]
   },
   "retrieval": {

@@ -35,6 +35,7 @@ CLASSIFIER_SYSTEM_PROMPT = """你是一个心理学知识库查询分类器。�
 - "grief_and_loss": 哀伤理论、丧失应对、居丧支持、延长哀伤
 - "relationships": 人际关系、亲密关系、依恋风格、沟通模式、冲突解决
 - "psychology_basics": 心理学基础概念（情绪调节、认知偏差、发展心理学常识等）
+- "adolescent_family": 青少年家庭议题（厌学/拒学、考试焦虑、校园霸凌、网络手机依赖、非自杀性自伤、教养方式、亲子沟通、青春期叛逆与 ODD 鉴别、离异/隔代/单亲家庭等场景指南）
 
 ## 判断指南
 - 涉及药物名、副作用、剂量 → medication_knowledge
@@ -46,6 +47,7 @@ CLASSIFIER_SYSTEM_PROMPT = """你是一个心理学知识库查询分类器。�
 - 涉及具体应对方法、放松技巧、疗法操作 → coping_strategies
 - 涉及咨询师视角的技法、家庭治疗经验 → clinical (private)
 - 模糊的基础心理学概念 → psychology_basics
+- 涉及青少年、青春期、厌学拒学、考试焦虑、霸凌、网瘾手机、孩子自伤、教养方式、亲子沟通 → adolescent_family（若同时涉及诊断症状也可叠加 disorder_knowledge）
 
 ## 输出格式
 严格输出 JSON，不要任何其他文字：
