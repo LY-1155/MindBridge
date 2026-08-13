@@ -44,6 +44,9 @@ class LLMConfig(BaseModel):
     api_base: str = Field(default_factory=lambda: settings.OPENAI_API_BASE)
     streaming: bool = True
     timeout: int = 60
+    # 透传给 ChatOpenAI 的额外参数（如 {"extra_body": {"enable_thinking": False}}）。
+    # 默认 None，不影响现有调用方；用于按调用关闭 qwen3.x 思考模式以降低延迟。
+    model_kwargs: Optional[Dict[str, Any]] = None
 
 
 class BaseLLMAdapter(ABC):
@@ -193,6 +196,7 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
             base_url=self.config.api_base,        # API地址（可以是本地地址）
             streaming=self.config.streaming,      # 是否流式输出
             timeout=self.config.timeout,          # 超时时间
+            model_kwargs=self.config.model_kwargs or {},  # 透传额外参数（关闭思考等）
         )
 
 

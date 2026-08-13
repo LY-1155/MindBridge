@@ -358,6 +358,24 @@ class InterventionReplyGenerator:
             probe_suggestion=suggestion,
         )
 
+    @staticmethod
+    def _format_scid_directive(scid_directive: str) -> str:
+        """把 SCID 访谈引擎的指令格式化为追加到 system prompt 的指令块。
+
+        为空时返回空串（不改变原 prompt）。追加在 INSTRUCTION_HIERARCHY_SUFFIX 之前，
+        与安全探针同模式：格式化的模板 prompt 之后追加，避免改动各 persona 模板。
+        """
+        if not scid_directive:
+            return ""
+        return (
+            "\n\n## SCID-5 结构化访谈指令（评估引擎引导，本轮有效）\n"
+            + scid_directive
+            + "\n要求：用周医生一贯温暖、口语化的语气完成上述指令，"
+              "绝不暴露『我在按手册访谈』；一次只问一个问题；"
+              "不要重复用户已经回答过的内容；"
+              "若用户情绪强烈或涉及安全风险，优先共情与安全，可暂停访谈。"
+        )
+
     def _build_assessor_context(self, session_id: Optional[str]) -> str:
         """从 session 构建评估上下文文本，注入 prompt。"""
         if not session_id:
@@ -440,7 +458,8 @@ class InterventionReplyGenerator:
 
     # ── streaming (async) methods ──────────────────────────
 
-    async def astream_comfort(self, req: InterventionRequest) -> AsyncIterator[str]:
+    async def astream_comfort(self, req: InterventionRequest,
+                              scid_directive: str = "") -> AsyncIterator[str]:
         """安抚路由流式生成：绕过 LCEL，直接调用 self._llm.astream()"""
         doctor_prompt = self._get_doctor_prompt("comfort")
         format_kw = self._get_format_kwargs(req)
@@ -448,7 +467,11 @@ class InterventionReplyGenerator:
             system_text = doctor_prompt.format(**format_kw)
         else:
             system_text = COMFORT_SYSTEM_PROMPT.format(**format_kw)
-        system_text = system_text + self._get_safety_probe(req) + INSTRUCTION_HIERARCHY_SUFFIX
+        system_text = (
+            system_text + self._get_safety_probe(req)
+            + self._format_scid_directive(scid_directive)
+            + INSTRUCTION_HIERARCHY_SUFFIX
+        )
         wrapped = wrap_user_text(req.user_text)
 
         messages = [SystemMessage(content=system_text), HumanMessage(content=wrapped)]
@@ -462,7 +485,8 @@ class InterventionReplyGenerator:
         self._save_turn(req.session_id, req.user_text, reply_text)
         self._save_probed_dimension(req.session_id, reply_text)
 
-    async def astream_general(self, req: InterventionRequest) -> AsyncIterator[str]:
+    async def astream_general(self, req: InterventionRequest,
+                              scid_directive: str = "") -> AsyncIterator[str]:
         """通用路由流式生成"""
         doctor_prompt = self._get_doctor_prompt("general")
         format_kw = self._get_format_kwargs(req)
@@ -470,7 +494,11 @@ class InterventionReplyGenerator:
             system_text = doctor_prompt.format(**format_kw)
         else:
             system_text = GENERAL_SYSTEM_PROMPT.format(**format_kw)
-        system_text = system_text + self._get_safety_probe(req) + INSTRUCTION_HIERARCHY_SUFFIX
+        system_text = (
+            system_text + self._get_safety_probe(req)
+            + self._format_scid_directive(scid_directive)
+            + INSTRUCTION_HIERARCHY_SUFFIX
+        )
         wrapped = wrap_user_text(req.user_text)
 
         messages = [SystemMessage(content=system_text), HumanMessage(content=wrapped)]
@@ -485,7 +513,8 @@ class InterventionReplyGenerator:
         self._save_probed_dimension(req.session_id, reply_text)
 
     async def astream_knowledge(self, req: InterventionRequest,
-                                 enriched_query: str = None) -> AsyncIterator[str]:
+                                 enriched_query: str = None,
+                                 scid_directive: str = "") -> AsyncIterator[str]:
         """知识路由流式生成：RAG 检索在流式开始前同步完成"""
         emotion = req.emotion or {}
 
@@ -507,7 +536,11 @@ class InterventionReplyGenerator:
             system_text = doctor_prompt.format(**format_kw)
         else:
             system_text = KNOWLEDGE_SYSTEM_PROMPT.format(**format_kw)
-        system_text = system_text + self._get_safety_probe(req) + INSTRUCTION_HIERARCHY_SUFFIX
+        system_text = (
+            system_text + self._get_safety_probe(req)
+            + self._format_scid_directive(scid_directive)
+            + INSTRUCTION_HIERARCHY_SUFFIX
+        )
         wrapped = wrap_user_text(req.user_text)
 
         messages = [SystemMessage(content=system_text), HumanMessage(content=wrapped)]
@@ -523,7 +556,8 @@ class InterventionReplyGenerator:
 
     # ── generate methods ────────────────────────────────────
 
-    def generate_comfort(self, req: InterventionRequest) -> InterventionResult:
+    def generate_comfort(self, req: InterventionRequest,
+                         scid_directive: str = "") -> InterventionResult:
         doctor_prompt = self._get_doctor_prompt("comfort")
         format_kw = self._get_format_kwargs(req)
         if doctor_prompt:
@@ -532,7 +566,10 @@ class InterventionReplyGenerator:
         else:
             system_text = COMFORT_SYSTEM_PROMPT.format(**format_kw)
             meta = {"implementation": "llm_comfort"}
-        system_text = system_text + self._get_safety_probe(req)
+        system_text = (
+            system_text + self._get_safety_probe(req)
+            + self._format_scid_directive(scid_directive)
+        )
         reply = self._invoke_chain(system_text, req.user_text)
         self._save_turn(req.session_id, req.user_text, reply)
         self._save_probed_dimension(req.session_id, reply)
@@ -542,7 +579,8 @@ class InterventionReplyGenerator:
             meta=meta,
         )
 
-    def generate_general(self, req: InterventionRequest) -> InterventionResult:
+    def generate_general(self, req: InterventionRequest,
+                         scid_directive: str = "") -> InterventionResult:
         doctor_prompt = self._get_doctor_prompt("general")
         format_kw = self._get_format_kwargs(req)
         if doctor_prompt:
@@ -551,7 +589,10 @@ class InterventionReplyGenerator:
         else:
             system_text = GENERAL_SYSTEM_PROMPT.format(**format_kw)
             meta = {"implementation": "llm_general"}
-        system_text = system_text + self._get_safety_probe(req)
+        system_text = (
+            system_text + self._get_safety_probe(req)
+            + self._format_scid_directive(scid_directive)
+        )
         reply = self._invoke_chain(system_text, req.user_text)
         self._save_turn(req.session_id, req.user_text, reply)
         self._save_probed_dimension(req.session_id, reply)
@@ -561,7 +602,8 @@ class InterventionReplyGenerator:
             meta=meta,
         )
 
-    def generate_knowledge(self, req: InterventionRequest, enriched_query: str = None) -> InterventionResult:
+    def generate_knowledge(self, req: InterventionRequest, enriched_query: str = None,
+                           scid_directive: str = "") -> InterventionResult:
         emotion = req.emotion or {}
 
         if enriched_query:
@@ -584,7 +626,10 @@ class InterventionReplyGenerator:
         else:
             system_text = KNOWLEDGE_SYSTEM_PROMPT.format(**format_kw)
             meta = {"implementation": "llm_knowledge", "retrieved_docs": len(docs)}
-        system_text = system_text + self._get_safety_probe(req)
+        system_text = (
+            system_text + self._get_safety_probe(req)
+            + self._format_scid_directive(scid_directive)
+        )
         reply = self._invoke_chain(system_text, req.user_text)
         self._save_turn(req.session_id, req.user_text, reply)
         self._save_probed_dimension(req.session_id, reply)

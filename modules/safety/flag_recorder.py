@@ -3,7 +3,8 @@
 
 职责：
 1. 将每次安全检测结果持久化到 safety_flags 表
-2. 滑动窗口累积规则：同一 user 在窗口内 level=1 达到阈值 → 自动升 level=2
+2. 滑动窗口累积规则：同一 user 在窗口内 level=1 达到阈值 → 自动软升级 level=2
+   （不设 blocked，交 LLM 语义评估器 / router 二次裁决，而非硬拦截短路）
 3. 人审接口预留
 
 配置项（来自 settings）：
@@ -163,12 +164,15 @@ class SafetyFlagRecorder:
                 "安全标记累积升级: user=%s recent_warnings=%d threshold=%d",
                 user_id, recent_count, self.threshold,
             )
-            # 写入一条额外的 level=2 标记（表示系统自动升级）
+            # 写入一条额外的 level=2 标记（表示系统自动升级）。
+            # blocked=False：累积升级是"软升级"，交 LLM 语义评估器（DOCTOR_MODE）/
+            # router 升段（非 DOCTOR_MODE）二次裁决，而不是直接硬拦截短路危机，
+            # 避免"连续几句情绪宣泄词"直接弹危机模板绕过评估器。
             self.record(
                 user_id=user_id,
                 session_id=session_id,
                 level=2,
-                blocked=True,
+                blocked=False,
                 matched_terms=[f"SYSTEM_ESCALATE: 窗口内 level=1 累计 {recent_count} 次 ≥ 阈值 {self.threshold}"],
             )
             return {
@@ -176,7 +180,7 @@ class SafetyFlagRecorder:
                 "original_level": 1,
                 "escalated": True,
                 "final_level": 2,
-                "final_blocked": True,
+                "final_blocked": False,
                 "recent_warnings": recent_count,
                 "threshold": self.threshold,
             }

@@ -65,26 +65,36 @@ def test_phase_regression_on_denial(assessor):
     assert phase == "explore"
 
 
-# ── 安全红线 ──────────────────────────────────────────────────
+# ── 安全锚点（危机判定改造 ADR-0013）───────────────────────────
 
 def test_safety_check_suicide_keyword(assessor):
-    """检测自杀关键词。"""
-    assert assessor._check_safety("我有时候真的不想活了", {"risk": 0.3})
+    """P1 自杀意念词命中 → 返回 "p1"（探针锚点，不再直接升级）。"""
+    assert assessor._check_safety("我有时候真的不想活了", {"risk": 0.3}) == "p1"
 
 
 def test_safety_check_self_harm(assessor):
-    """检测自伤关键词。"""
-    assert assessor._check_safety("我控制不住划手臂", {"risk": 0.4})
+    """P1 自伤词命中 → 返回 "p1"。"""
+    assert assessor._check_safety("我控制不住划手臂", {"risk": 0.4}) == "p1"
 
 
-def test_safety_check_high_risk(assessor):
-    """risk >= 0.7 直接触发。"""
-    assert assessor._check_safety("只是心情不太好", {"risk": 0.8})
+def test_safety_check_p0_hard_gate(assessor):
+    """P0 显式危险词命中 → 返回 "p0"（硬闸门）。"""
+    assert assessor._check_safety("我已经买了安眠药，今晚就吃", {"risk": 0.5}) == "p0"
+
+
+def test_safety_check_high_risk_deferred_to_judge(assessor):
+    """risk >= 0.7 不再在此直接升级 —— 由语义安全评估器裁决（ADR-0013）。"""
+    assert assessor._check_safety("只是心情不太好", {"risk": 0.8}) is None
+
+
+def test_safety_check_weak_signal_ignored(assessor):
+    """P2 弱信号（"狠狠"）完全忽略，不升级不探针 —— 误伤案例修复。"""
+    assert assessor._check_safety("我这时候很想大叫狠狠的撞东西", {"risk": 0.4}) is None
 
 
 def test_safety_check_clean(assessor):
     """正常文本不触发。"""
-    assert not assessor._check_safety("今天天气不错", {"risk": 0.1})
+    assert assessor._check_safety("今天天气不错", {"risk": 0.1}) is None
 
 
 # ── 家庭成员检测 ──────────────────────────────────────────────
@@ -135,7 +145,21 @@ def test_assess_full(assessor):
 
 
 def test_assess_crisis_escalation(assessor):
-    """安全红线文本应触发升级。"""
+    """P0 显式危险文本（计划/手段）应触发硬升级。"""
+    result = assessor.assess(
+        user_text="我已经买了安眠药，今晚就吃",
+        message_count=5,
+        existing_phase="check_in",
+        existing_hypothesis=None,
+        existing_members=[],
+        emotion={"primary_emotion": "sadness", "intensity": 0.8, "risk": 0.9},
+        route={"route": "comfort", "confidence": 0.8},
+    )
+    assert result.escalation_flag is True
+
+
+def test_assess_p1_probe_no_escalation(assessor):
+    """P1 危机意念 → 不再升级 crisis（转探针），probe_direction 为安全确认方向。"""
     result = assessor.assess(
         user_text="我真的不想活了，活着没意思",
         message_count=5,
@@ -145,7 +169,22 @@ def test_assess_crisis_escalation(assessor):
         emotion={"primary_emotion": "sadness", "intensity": 0.8, "risk": 0.9},
         route={"route": "comfort", "confidence": 0.8},
     )
-    assert result.escalation_flag is True
+    assert result.escalation_flag is False
+    assert result.probe_direction and "safety_check" in result.probe_direction
+
+
+def test_assess_weak_signal_no_escalation(assessor):
+    """"狠狠撞东西"（P2 弱信号）不再误伤升级。"""
+    result = assessor.assess(
+        user_text="我这时候很想大叫狠狠的撞东西，感觉身体上的疼痛会麻痹自己",
+        message_count=10,
+        existing_phase="check_in",
+        existing_hypothesis=None,
+        existing_members=[],
+        emotion={"primary_emotion": "anger", "intensity": 0.7, "risk": 0.6},
+        route={"route": "comfort", "confidence": 0.8},
+    )
+    assert result.escalation_flag is False
 
 
 def test_assess_family_hypothesis(assessor):

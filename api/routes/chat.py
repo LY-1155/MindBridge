@@ -136,6 +136,7 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(get_current_u
             safety=safety,
             session_id=session_id,
             user_id=user_id,
+            safety_verdict=pre_state.get("safety_verdict"),
         )
 
         from modules.runtime import get_pipeline_services

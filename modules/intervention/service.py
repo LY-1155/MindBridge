@@ -97,12 +97,21 @@ class InterventionService:
 
     def _run_doctor_assessment(
         self, req: InterventionRequest, session, route: str
-    ) -> tuple[str, Optional[str]]:
-        """DOCTOR_MODE 共享评估：返回 (possibly_upgraded_route, enriched_query)。"""
-        if not settings.DOCTOR_MODE or session is None or route == "crisis":
-            return route, None
+    ) -> tuple[str, Optional[str], str]:
+        """DOCTOR_MODE 共享评估：返回 (possibly_upgraded_route, enriched_query, scid_directive)。
+
+        危机判定整合（ADR-0013）：风险词命中 ≠ 危机触发。
+        P0 硬闸门 + 语义安全评估器三级裁决驱动最终路由。
+
+        scid_directive：主动式 SCID 访谈引擎产出的「下一步该问什么」指令
+        （仅抑郁模块起步，见 modules/assessment/scid_interview.py）。引擎纯规则、
+        不调 LLM；指令由 generator 注入 prompt，用医生语气自然问出。
+        """
+        if not settings.DOCTOR_MODE or session is None:
+            return route, None, ""
 
         scid_enriched_query: Optional[str] = None
+        scid_directive: str = ""
         try:
             assessor = self._get_assessor()
             assess_result = assessor.assess(
@@ -131,27 +140,126 @@ class InterventionService:
             )
             session.update_scid_flags(scid_update.criteria_met)
 
-            if scid_update.risk_flags:
-                route = "crisis"
-                logger.info(
-                    "[DOCTOR_MODE] SCID risk flags: %s → crisis",
-                    scid_update.risk_flags,
+            # ── 主动式 SCID 访谈（医生模式，抑郁模块起步）──
+            # 纯规则状态机：决定下一句问什么，产出 directive 由 generator 注入 prompt。
+            # 失败不阻断（回退到无访谈指令的正常医生对话）。
+            try:
+                from modules.assessment.scid_interview import SCIDInterviewEngine
+
+                engine = SCIDInterviewEngine()
+                passive_mdd = (
+                    session.metadata.scid_flags or {}
+                ).get("MDD", {}).get("criteria_met", [])
+                iv_state, scid_directive = engine.step_turn(
+                    session.metadata.scid_interview_state,
+                    req.user_text,
+                    passive_mdd,
                 )
+                if iv_state is not None:
+                    session.update_scid_interview_state(iv_state)
+                if scid_directive:
+                    logger.info(
+                        "[DOCTOR_MODE] SCID interview active step=%s confirmed=%s denied=%s",
+                        iv_state.get("step") if iv_state else "-",
+                        (iv_state or {}).get("criteria_confirmed"),
+                        (iv_state or {}).get("criteria_denied"),
+                    )
+            except Exception:
+                logger.warning(
+                    "[DOCTOR_MODE] SCID interview engine failed", exc_info=True
+                )
+
+            # 注：scid risk_flags 不再直接升级路由 —— 改为语义安全评估器的锚点输入。
+            # 评估器已在图上读取 session.scid_flags 做跨轮累积判断（复现 → 持续监测）。
             if scid_update.suggested_retrieval_query:
                 scid_enriched_query = scid_update.suggested_retrieval_query
-            if assess_result.escalation_flag:
-                route = "crisis"
-                logger.info("[DOCTOR_MODE] Assessor escalation → crisis")
+
+            # ── 危机判定整合 ──
+            route = self._apply_safety_verdict(req, session, route, assess_result)
 
             logger.debug(
-                "[DOCTOR_MODE] phase=%s probe=%s",
+                "[DOCTOR_MODE] phase=%s probe=%s verdict=%s scid_directive=%s",
                 assess_result.suggested_phase,
                 assess_result.probe_direction,
+                (req.safety_verdict or {}).get("verdict"),
+                bool(scid_directive),
             )
         except Exception:
             logger.warning("[DOCTOR_MODE] Assessment failed", exc_info=True)
 
-        return route, scid_enriched_query
+        return route, scid_enriched_query, scid_directive
+
+    def _apply_safety_verdict(
+        self, req: InterventionRequest, session, route: str, assess_result
+    ) -> str:
+        """危机判定整合：P0 硬闸门 + 评估器三级裁决 → 最终路由。
+
+        - P0 硬闸门（family_assessor 升级 / safety.blocked）→ crisis（不可降级）
+        - verdict crisis → crisis
+        - verdict probe → 状态机迁移（确认→CRISIS / 否认→NONE / 累积→CRISIS），
+          未升级则保持路由（generator 注入安全探针）
+        - verdict no_risk → 正常对话（router 的 crisis 降级到 comfort 共情路径）
+        - verdict None（评估器跳过/失败）→ 保守保留 router 决策
+        """
+        verdict_dict = req.safety_verdict or {}
+        verdict = verdict_dict.get("verdict")
+        safety = req.safety or {}
+
+        # 1. P0 硬闸门
+        if assess_result.escalation_flag or safety.get("blocked"):
+            session.metadata.safety_state = {
+                "status": "CRISIS", "probe_count": 0, "denial_mark": False,
+            }
+            self._persist_safety_state(session)
+            logger.info("[DOCTOR_MODE] P0 硬闸门 → crisis")
+            return "crisis"
+
+        # 2. 状态机迁移（crisis / probe / no_risk 三种裁决）
+        if verdict in ("crisis", "probe", "no_risk"):
+            from modules.assessment.risk_anchors import transition_safety_state
+
+            # 只有"有风险锚点"的 probe 才计入累积升级；纯情绪宣泄（无锚点）
+            # 反复出现不触发危机（收窄原则，ADR-0013）
+            anchored_probe = bool(verdict_dict.get("matched_anchors"))
+            new_state = transition_safety_state(
+                session.metadata.safety_state,
+                verdict,
+                req.user_text,
+                max_probe_count=settings.SAFETY_PROBE_MAX_COUNT,
+                anchored_probe=anchored_probe,
+            )
+            session.metadata.safety_state = new_state
+            self._persist_safety_state(session)
+
+            if new_state["status"] == "CRISIS":
+                logger.info(
+                    "[DOCTOR_MODE] 状态机 → CRISIS (verdict=%s probe_count=%d)",
+                    verdict, new_state["probe_count"],
+                )
+                return "crisis"
+
+        # 3. 非 crisis 裁决下的路由处理
+        if verdict == "no_risk":
+            if route == "crisis":
+                logger.info("[DOCTOR_MODE] 评估器 no_risk 降级 router crisis → comfort")
+                return "comfort"
+            return route
+        if verdict == "probe":
+            # probe：医生继续对话并注入安全探针（generator 读 req.safety_verdict）
+            if route == "crisis":
+                return "comfort"
+            return route
+
+        # 4. verdict None（评估器跳过/失败）→ 保守保留 router 决策
+        return route
+
+    @staticmethod
+    def _persist_safety_state(session) -> None:
+        """持久化 safety_state。持久化失败不阻断（内存兜底，下次仍可用）。"""
+        try:
+            session.update_safety_state(session.metadata.safety_state)
+        except Exception:
+            pass
 
     def _resolve_route(self, req: InterventionRequest) -> str:
         """处理低置信度回退：knowledge/general + confidence<0.5 → 退回上一级"""
@@ -271,7 +379,9 @@ class InterventionService:
                 )
 
         # ── 医生模式 ──
-        route, scid_enriched_query = self._run_doctor_assessment(req, session, route)
+        route, scid_enriched_query, scid_directive = self._run_doctor_assessment(
+            req, session, route
+        )
 
         # INTERVENTION TRACE — 分发分支
         logger.info("[PIPELINE:TRACE] INTERVENTION dispatch → %s", route)
@@ -280,10 +390,14 @@ class InterventionService:
             return self._get_crisis().handle(req)
 
         if route == "general":
-            return self._get_generator().generate_general(req)
+            return self._get_generator().generate_general(
+                req, scid_directive=scid_directive
+            )
 
         if route == "comfort":
-            return self._get_generator().generate_comfort(req)
+            return self._get_generator().generate_comfort(
+                req, scid_directive=scid_directive
+            )
 
         if route == "knowledge":
             session = self._get_session(req.session_id)
@@ -335,7 +449,9 @@ class InterventionService:
                 if session is not None:
                     from modules.intervention.rag.scale_feedback import enrich_query_with_scale
                     enriched_query = enrich_query_with_scale(req.user_text, session)
-            return self._get_generator().generate_knowledge(req, enriched_query=enriched_query)
+            return self._get_generator().generate_knowledge(
+                req, enriched_query=enriched_query, scid_directive=scid_directive
+            )
 
         # 未知路由，返回占位
         return InterventionResult(
@@ -427,7 +543,9 @@ class InterventionService:
                 return
 
         # ── 医生模式 ──
-        route, scid_enriched_query = self._run_doctor_assessment(req, session, route)
+        route, scid_enriched_query, scid_directive = self._run_doctor_assessment(
+            req, session, route
+        )
 
         # INTERVENTION TRACE
         logger.info("[PIPELINE:TRACE] INTERVENTION dispatch (stream) → %s", route)
@@ -438,12 +556,16 @@ class InterventionService:
             return
 
         if route == "general":
-            async for token in self._get_generator().astream_general(req):
+            async for token in self._get_generator().astream_general(
+                req, scid_directive=scid_directive
+            ):
                 yield token
             return
 
         if route == "comfort":
-            async for token in self._get_generator().astream_comfort(req):
+            async for token in self._get_generator().astream_comfort(
+                req, scid_directive=scid_directive
+            ):
                 yield token
             return
 
@@ -485,7 +607,9 @@ class InterventionService:
                 if session is not None:
                     from modules.intervention.rag.scale_feedback import enrich_query_with_scale
                     enriched_query = enrich_query_with_scale(req.user_text, session)
-            async for token in self._get_generator().astream_knowledge(req, enriched_query=enriched_query):
+            async for token in self._get_generator().astream_knowledge(
+                req, enriched_query=enriched_query, scid_directive=scid_directive
+            ):
                 yield token
             return
 

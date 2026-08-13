@@ -169,6 +169,7 @@ class WebSocketPipeline:
             emotion=emotion_dict,
             safety=safety_dict,
             session_id=session_id,
+            safety_verdict=pre_result.get("safety_verdict"),
         )
         tts = SentenceTTS(self._tts)
         async for token in self._services.intervention.astream_intervene(

@@ -54,6 +54,10 @@ class SessionMetadata(BaseModel):
     #   如 "孩子的不上学可能承担了转移父母冲突的功能"
     scid_flags: Dict[str, Any] = Field(default_factory=dict)
     #   静默 SCID 追踪：{"MDD": {"criteria_met": ["sleep", "anhedonia"], "count": 2}, ...}
+    scid_interview_state: Optional[Dict[str, Any]] = None
+    #   主动式 SCID 访谈状态机（模块/步骤/已确认条目等，见 scid_interview.py）
+    safety_state: Optional[Dict[str, Any]] = None
+    #   危机状态机（ADR-0013）：{"status": "NONE"|"PROBING"|"CRISIS", "probe_count": N, "denial_mark": bool}
 
 
 class EmotionRecord(BaseModel):
@@ -140,6 +144,8 @@ class TherapySessionMemory:
                     family_members=meta.get("family_members", []),
                     working_hypothesis=meta.get("working_hypothesis"),
                     scid_flags=meta.get("scid_flags", {}),
+                    scid_interview_state=meta.get("scid_interview_state"),
+                    safety_state=meta.get("safety_state"),
                 )
                 logger.debug("[SCALE:LOAD] Redis HIT session=%s scale_state=%s",
                              self.session_id,
@@ -182,6 +188,8 @@ class TherapySessionMemory:
                     family_members=session_data.get("family_members", []),
                     working_hypothesis=session_data.get("working_hypothesis"),
                     scid_flags=session_data.get("scid_flags", {}),
+                    scid_interview_state=session_data.get("scid_interview_state"),
+                    safety_state=session_data.get("safety_state"),
                 )
                 # 回填 Redis 缓存
                 self._sync_meta_to_redis()
@@ -236,6 +244,8 @@ class TherapySessionMemory:
                     "family_members": self.metadata.family_members,
                     "working_hypothesis": self.metadata.working_hypothesis,
                     "scid_flags": self.metadata.scid_flags,
+                    "scid_interview_state": self.metadata.scid_interview_state,
+                    "safety_state": self.metadata.safety_state,
                     "last_active": self.metadata.last_active.isoformat(),
                     "created_at": self.metadata.created_at.isoformat(),
                 },
@@ -278,6 +288,8 @@ class TherapySessionMemory:
                     "family_members": self.metadata.family_members,
                     "working_hypothesis": self.metadata.working_hypothesis,
                     "scid_flags": self.metadata.scid_flags,
+                    "scid_interview_state": self.metadata.scid_interview_state,
+                    "safety_state": self.metadata.safety_state,
                 },
             )
             # 同步 Redis
@@ -316,6 +328,8 @@ class TherapySessionMemory:
                     "family_members": self.metadata.family_members,
                     "working_hypothesis": self.metadata.working_hypothesis,
                     "scid_flags": self.metadata.scid_flags,
+                    "scid_interview_state": self.metadata.scid_interview_state,
+                    "safety_state": self.metadata.safety_state,
                     "last_active": self.metadata.last_active.isoformat(),
                     "created_at": self.metadata.created_at.isoformat(),
                 },
@@ -345,6 +359,8 @@ class TherapySessionMemory:
                     "family_members": self.metadata.family_members,
                     "working_hypothesis": self.metadata.working_hypothesis,
                     "scid_flags": self.metadata.scid_flags,
+                    "scid_interview_state": self.metadata.scid_interview_state,
+                    "safety_state": self.metadata.safety_state,
                 },
             )
         except Exception as e:
@@ -558,6 +574,24 @@ class TherapySessionMemory:
         self.metadata.scid_flags = existing
         self._save_to_database()
 
+    def update_scid_interview_state(self, state: Optional[Dict[str, Any]]) -> None:
+        """更新主动式 SCID 访谈状态机并持久化。
+
+        state 形如 {"module": "MDD", "status": "active", "step": "gate", ...}
+        （见 modules/assessment/scid_interview.py 的 _new_state）。
+        传 None 表示清除（会话重建/重置）。
+        """
+        self.metadata.scid_interview_state = state
+        self._save_to_database()
+
+    def update_safety_state(self, state: Optional[Dict[str, Any]]) -> None:
+        """更新危机状态机（ADR-0013）并持久化。
+
+        state 形如 {"status": "NONE"|"PROBING"|"CRISIS", "probe_count": N, "denial_mark": bool}。
+        """
+        self.metadata.safety_state = state
+        self._save_to_database()
+
     def get_assessor_context(self) -> str:
         """构建注入 prompt 的评估上下文文本。"""
         parts = [f"**当前会话阶段**：{self.metadata.phase}"]
@@ -655,6 +689,8 @@ class SessionManager:
                         "family_members": [],
                         "working_hypothesis": None,
                         "scid_flags": {},
+                        "scid_interview_state": None,
+                        "safety_state": None,
                     },
                 )
             except Exception as e:
@@ -679,6 +715,8 @@ class SessionManager:
                     "family_members": [],
                     "working_hypothesis": None,
                     "scid_flags": {},
+                    "scid_interview_state": None,
+                    "safety_state": None,
                     "last_active": datetime.now().isoformat(),
                     "created_at": datetime.now().isoformat(),
                 },

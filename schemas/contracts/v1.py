@@ -112,6 +112,10 @@ class InterventionRequest(BaseModel):
     emotion: Dict[str, Any] = Field(..., description="EmotionTags.model_dump()")
     safety: Dict[str, Any] = Field(..., description="SafetyCheckResult.model_dump()")
     session_id: Optional[str] = None
+    safety_verdict: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="语义安全评估器裁决 dict（SafetyVerdict.to_dict()）；None=未运行/无锚点。医生模式下驱动 crisis/probe/no_risk 三分支。",
+    )
 
 
 class InterventionResult(BaseModel):
@@ -158,4 +162,8 @@ class PipelineOutput(BaseModel):
     stopped_after_safety: bool = Field(
         default=False,
         description="安全短路时后续阶段可为占位数据",
+    )
+    safety_verdict: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="语义安全评估器裁决 dict；None=未运行/无锚点",
     )

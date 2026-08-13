@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     DOCTOR_MODE: bool = False       # 总开关；true=启用周医生风格对话
     DOCTOR_PERSONA: str = "zhou"    # persona 选择（zhou / future personas）
 
+    # ── 语义安全评估器（危机判定改造，ADR-0013）────────────────
+    SAFETY_JUDGE_MODEL: str = "qwen-turbo"             # 评估器专用模型（flash 级，可在 .env 覆盖）
+    SAFETY_JUDGE_ANCHOR_RISK_THRESHOLD: float = 0.4    # 情绪风险锚点低阈值（故意低于 crisis 阈值 0.7，宁可多调不可漏掉）
+    SAFETY_JUDGE_EVERY_TURN: bool = False              # 锚点失效后备开关：每轮调用评估器
+    SAFETY_JUDGE_TIMEOUT_SECONDS: int = 5              # 评估器 LLM 调用超时（LLMConfig.timeout）
+    SAFETY_JUDGE_HISTORY_TURNS: int = 6                # 评估器读最近 N 轮对话
+    SAFETY_PROBE_MAX_COUNT: int = 3                    # probe 累积升级阈值（多次探针复现 → crisis）
+
     # ASR（听写）：sensevoice 偏中文口语场景；无 funasr 或失败时自动回退 whisper
     ASR_BACKEND: str = "sensevoice"
     SENSEVOICE_ASR_MODEL: str = "iic/SenseVoiceSmall"

@@ -195,7 +195,8 @@ class TestComfortRouteLLMGeneration:
         assert "压力" in result.reply
         assert result.emergency_triggered is False
         assert result.empathy == ""
-        assert result.meta["implementation"] == "llm_comfort"
+        # DOCTOR_MODE=true（.env）时走周医生 persona，meta 为 llm_comfort_doctor
+        assert result.meta["implementation"] in ("llm_comfort", "llm_comfort_doctor")
 
         # LLM 被正确调用
         assert fake_llm.last_messages is not None
@@ -278,7 +279,8 @@ class TestKnowledgeRouteRAGLLM:
         # LLM 生成的回复含知识内容
         assert "CBT" in result.reply
         assert result.emergency_triggered is False
-        assert result.meta["implementation"] == "llm_knowledge"
+        # DOCTOR_MODE=true（.env）时走周医生 persona，meta 为 llm_knowledge_doctor
+        assert result.meta["implementation"] in ("llm_knowledge", "llm_knowledge_doctor")
 
     def test_knowledge_injects_rag_results_into_prompt(self):
         """RAG 检索结果被注入到 LLM prompt 中"""
@@ -527,3 +529,144 @@ class TestSessionWriteBack:
         result = svc.intervene(req)
 
         assert result.reply == "我理解。"
+
+
+# ---------------------------------------------------------------------------
+# 危机判定整合（ADR-0013）：P0 硬闸门 + 评估器三级裁决
+# ---------------------------------------------------------------------------
+
+class FakeSafetySession:
+    """仅暴露 _apply_safety_verdict 所需的最小会话接口。"""
+
+    def __init__(self):
+        from types import SimpleNamespace
+
+        self.metadata = SimpleNamespace(safety_state=None)
+
+    def update_safety_state(self, state):
+        self.metadata.safety_state = state
+
+
+class TestSafetyVerdictIntegration:
+    """语义安全评估器裁决如何驱动最终路由。"""
+
+    def _svc(self):
+        from modules.intervention.service import InterventionService
+
+        return InterventionService()
+
+    def _req(self, verdict_dict, route="comfort", text="普通话语", safety=None):
+        return InterventionRequest(
+            user_text=text,
+            route={"route": route, "confidence": 0.9},
+            emotion={"primary_emotion": "sadness", "intensity": 0.6, "risk": 0.5},
+            safety=safety or {"level": 0, "blocked": False, "matched_terms": []},
+            session_id=None,
+            safety_verdict=verdict_dict,
+        )
+
+    def _assess(self, escalation_flag=False):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(escalation_flag=escalation_flag)
+
+    def test_verdict_crisis_forces_crisis(self):
+        """verdict=crisis → 路由升为 crisis，状态机置 CRISIS。"""
+        svc = self._svc()
+        session = FakeSafetySession()
+        route = svc._apply_safety_verdict(
+            self._req({"verdict": "crisis", "risk_type": "suicide"}), session, "comfort", self._assess()
+        )
+        assert route == "crisis"
+        assert session.metadata.safety_state["status"] == "CRISIS"
+
+    def test_p0_hard_gate_overrides_verdict(self):
+        """P0 硬闸门（escalation_flag）无条件 crisis，即使评估器被判 no_risk。"""
+        svc = self._svc()
+        session = FakeSafetySession()
+        route = svc._apply_safety_verdict(
+            self._req({"verdict": "no_risk"}), session, "comfort", self._assess(escalation_flag=True)
+        )
+        assert route == "crisis"
+        assert session.metadata.safety_state["status"] == "CRISIS"
+
+    def test_verdict_no_risk_downgrades_router_crisis(self):
+        """router 判 crisis 但评估器判 no_risk → 降级到 comfort（不打断对话）。"""
+        svc = self._svc()
+        session = FakeSafetySession()
+        route = svc._apply_safety_verdict(
+            self._req({"verdict": "no_risk"}), session, "crisis", self._assess()
+        )
+        assert route == "comfort"
+
+    def test_verdict_probe_sets_probing_state(self):
+        """verdict=probe（有锚点意念）→ 状态机进入 PROBING，路由保持（探针注入由 generator 完成）。"""
+        svc = self._svc()
+        session = FakeSafetySession()
+        route = svc._apply_safety_verdict(
+            self._req({
+                "verdict": "probe", "probe_suggestion": "是真心不想活吗？",
+                "matched_anchors": ["p1:suicide:不想活"],
+            }),
+            session, "comfort", self._assess(),
+        )
+        assert route == "comfort"
+        assert session.metadata.safety_state["status"] == "PROBING"
+        assert session.metadata.safety_state["probe_count"] == 1
+
+    def test_verdict_probe_without_anchor_no_accumulation(self):
+        """verdict=probe 但无锚点（纯情绪宣泄触发）→ 不进入 PROBING（收窄 ADR-0013）。"""
+        svc = self._svc()
+        session = FakeSafetySession()
+        route = svc._apply_safety_verdict(
+            self._req({"verdict": "probe", "probe_suggestion": "是不是心里太难受了？"}),
+            session, "comfort", self._assess(),
+        )
+        assert route == "comfort"
+        assert session.metadata.safety_state["status"] == "NONE"
+
+    def test_verdict_none_keeps_route(self):
+        """verdict=None（评估器跳过/失败）→ 保守保留 router 决策。"""
+        svc = self._svc()
+        session = FakeSafetySession()
+        route = svc._apply_safety_verdict(
+            self._req(None), session, "knowledge", self._assess()
+        )
+        assert route == "knowledge"
+        assert session.metadata.safety_state is None
+
+
+class TestSafetyProbeInjection:
+    """探针指令注入：verdict=probe 时医生 prompt 附加安全确认段。"""
+
+    def _gen(self):
+        from modules.intervention.generator import InterventionReplyGenerator
+
+        return InterventionReplyGenerator(llm=FakeLLM())
+
+    def test_probe_verdict_injects_suggestion(self):
+        """probe 裁决 → 探针模板含 LLM 生成的 probe_suggestion 与风险类型。"""
+        req = _make_comfort_req(
+            safety_verdict={
+                "verdict": "probe", "risk_type": "suicide",
+                "probe_suggestion": "是真心不想活，还是心里难受，还是都有？",
+            }
+        )
+        probe = self._gen()._get_safety_probe(req)
+        assert "是真心不想活" in probe
+        assert "suicide" in probe
+
+    def test_non_probe_verdict_injects_nothing(self):
+        """no_risk / crisis / None → 不注入探针段。"""
+        gen = self._gen()
+        for verdict_dict in ({"verdict": "no_risk"}, {"verdict": "crisis"}, None):
+            req = _make_comfort_req(safety_verdict=verdict_dict)
+            assert gen._get_safety_probe(req) == ""
+
+    def test_probe_verdict_falls_back_to_rule_template(self):
+        """probe 但无 probe_suggestion → 规则三选一兜底。"""
+        req = _make_comfort_req(
+            safety_verdict={"verdict": "probe", "risk_type": "suicide", "probe_suggestion": None}
+        )
+        probe = self._gen()._get_safety_probe(req)
+        assert "不想活" in probe or "难受" in probe

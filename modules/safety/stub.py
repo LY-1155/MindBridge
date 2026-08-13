@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Optional
 
 from schemas.contracts import SafetyCheckRequest, SafetyCheckResult
 from modules.safety.keyword_filter import SensitivityFilter
 from modules.safety.emergency_push import get_emergency_push_service
 from modules.prompt_guard import wrap_user_text, INSTRUCTION_HIERARCHY_SUFFIX
+from modules.assessment.risk_anchors import match_anchor
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +29,10 @@ _SAFETY_LLM_PROMPT = """你是心理危机识别专家。用户的一句话触�
 {user_text}
 
 ## 判断标准
-- 真实危机：用户明确表达了结束生命、伤害自己或他人的意图或计划
-- 情绪表达：用户只是在描述痛苦、疲惫、失眠等，没有自我伤害的意图
+- 真实危机：用户明确了具体的自杀/自伤**计划、手段、时间安排，或即刻行动**，
+  如"我现在就要去死""我已经决定结束自己""遗书写好了""正在割腕"
+- 意念/情绪表达：仅说"不想活了""活着没意思""不如不活了""活着太痛苦"等，
+  无计划与即刻行动 → 不是真实危机（但仍需医生继续关心）
 - 时间描述：凌晨"三四点"、日期、数量等正常表达是误报
 - 日常用语："活着好累""累死了""气死了"等口语夸张表达不是危机
 
@@ -44,10 +48,13 @@ def _get_llm():
             from core.llm.base import get_llm_adapter, LLMConfig
             from config.settings import settings
 
+            # qwen3.x 默认开思考模式：二分类 JSON 无需推理，关闭它避免 max_tokens
+            # 被思考占满导致 content 为空（实测开思考 10s+ / 关思考 0.6s）。
             config = LLMConfig(
                 model_name=getattr(settings, 'SCORING_MODEL_NAME', settings.MODEL_NAME),
                 temperature=0,
-                max_tokens=128,
+                max_tokens=512,
+                model_kwargs={"extra_body": {"enable_thinking": False}},
             )
             _llm_instance = get_llm_adapter("openai_compatible", config=config)
             logger.info("StubSafetyService: LLM 验证器已加载 (model=%s)", config.model_name)
@@ -55,6 +62,34 @@ def _get_llm():
             logger.warning("StubSafetyService: LLM 验证器加载失败，回退纯关键词: %s", e)
             _llm_instance = None
     return _llm_instance
+
+
+def _parse_verify_json(raw: str) -> Optional[dict]:
+    """鲁棒解析 LLM 验证输出：容忍 ```json 代码块、前后杂文本（对齐 safety_judge._parse_json_fallback）。"""
+    if not raw:
+        return None
+    text = raw.strip()
+    # 剥掉 markdown 代码围栏（```json ... ``` / ``` ... ```）
+    text = re.sub(r"^```[a-zA-Z]*\s*\n?", "", text)
+    text = re.sub(r"\n?```\s*$", "", text)
+    text = text.strip()
+    # 直接解析
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    # 提取第一个完整 JSON 对象
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except Exception:
+            pass
+    # 兜底：只取布尔判断
+    m = re.search(r'"is_real_crisis"\s*[:：]\s*(true|false)', text, re.IGNORECASE)
+    if m:
+        return {"is_real_crisis": m.group(1).lower() == "true", "reason": ""}
+    return None
 
 
 def _verify_with_llm(text: str, keywords: list) -> tuple[bool, str]:
@@ -72,8 +107,11 @@ def _verify_with_llm(text: str, keywords: list) -> tuple[bool, str]:
         from langchain_core.messages import HumanMessage
         response = llm.invoke([HumanMessage(content=prompt)])
         raw = response.content if hasattr(response, "content") else str(response)
-        result = json.loads(raw)
-        return result.get("is_real_crisis", True), result.get("reason", "")
+        result = _parse_verify_json(raw)
+        if result is None:
+            logger.warning("LLM 安全验证输出无法解析，保守按真实危机处理: %s", str(raw)[:120])
+            return True, "LLM 输出格式异常"
+        return bool(result.get("is_real_crisis", True)), str(result.get("reason", ""))
     except Exception as e:
         logger.warning("LLM 安全验证失败，保守按真实危机处理: %s", e)
         return True, "LLM 调用异常"
@@ -123,9 +161,15 @@ class StubSafetyService:
             contract_level = 0
             contract_blocked = False
 
-        # ── LLM 语义验证：关键词命中后，用 LLM 判断是否为真实危机 ──
+        # ── LLM 语义验证：level_1 硬拦命中且非 P0 时，用 LLM 判断是否为真实危机 ──
+        # 只复核 level_1（contract_level>=2）：level_2 是软警告，跳过复核可避免把
+        # 意念词降级到 level 0 后 orchestrator 的累积判定（level>=1）永不触发，
+        # flag_recorder 的累积兜底随之失效。
+        # P0（计划/即刻行动）短语跳过复核：避免 LLM 误降级破坏"我现在就去死"
+        # "我想自杀"的快速硬拦，也省一次 LLM 调用。
         llm_verified = False
-        if contract_level >= 1 and keywords:
+        p0_hit = bool(match_anchor(req.text).get("p0"))
+        if contract_level >= 2 and keywords and not p0_hit:
             is_real, reason = _verify_with_llm(req.text, keywords)
             llm_verified = True
             if not is_real:

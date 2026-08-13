@@ -180,7 +180,8 @@ class TestSafetyFlagRecorder:
         )
         assert result["escalated"] is True
         assert result["final_level"] == 2
-        assert result["final_blocked"] is True
+        # 收窄后：累积升级是软升级（不设 blocked），交 LLM 评估器/router 二次裁决
+        assert result["final_blocked"] is False
         assert result["recent_warnings"] >= 3
 
     def test_should_escalate_returns_bool(self, user_id):

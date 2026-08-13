@@ -2,7 +2,10 @@
 
 对照 DSM-5 标准，基于规则（关键词+模式）匹配临床 criteria。
 完全静默 — 不产生对话输出，仅更新 session.scid_flags。
-当触及安全红线时，通过 InterventionService 升级路由。
+
+危机判定改造（ADR-0013）：risk_flags 语义变为**语义安全评估器的锚点输入**，
+不再直接升级路由。跨轮累积判断（如 death_si 复现）由评估器读取 session.scid_flags
+在图上完成（见 modules/assessment/safety_judge.py 的 _scid_has_risk）。
 """
 
 from __future__ import annotations

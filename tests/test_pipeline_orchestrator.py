@@ -27,6 +27,7 @@ def test_pipeline_stub_router_risk_band():
         MOCK_EMOTION=False,
         MOCK_ROUTER=False,
         MOCK_INTERVENTION=True,
+        DOCTOR_MODE=False,  # 聚焦路由测试，跳过语义安全评估器（避免真实 LLM 调用）
     )
     svc = build_pipeline_services(cfg)
 
@@ -38,7 +39,8 @@ def test_pipeline_stub_router_risk_band():
 
     svc.emotion = FixedEmotion()
     out = run_pipeline(PipelineInput(text="失眠"), services=svc)
-    assert out.route.get("route") == "knowledge"
+    # risk=0.5 恰好落在 comfort 段（router_rules.json: comfort_risk=0.5，sadness 有段内偏向）
+    assert out.route.get("route") == "comfort"
 
 
 def test_safety_shortcut_skips_emotion_router_calls():

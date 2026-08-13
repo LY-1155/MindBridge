@@ -28,16 +28,27 @@ CONFLICT_KEYWORDS = [
     "冲突", "矛盾", "吵得", "闹得", "不愉快", "争执", "争吵",
 ]
 
-# ── 安全红线关键词（从 Zhou 数据的 crisis protocol 提取）─────
+# ── 安全锚点（危机判定改造 ADR-0013）───────────────────────────
+# 风险词命中 ≠ 危机触发。分级词表统一来自 modules.assessment.risk_anchors：
+#   P0 显式危险 → 硬闸门升级 crisis；P1 意念/冲动 → 转探针；P2 弱信号（"狠狠"等）→ 忽略。
+from modules.assessment.risk_anchors import RISK_ANCHOR_P0, RISK_ANCHOR_P1
+
+# 兼容别名：旧扁平红线表 = P0 + P1 合并（P2 弱信号已剔除，"狠狠"不再命中）。
+# 新代码请用 risk_anchors 的 P0/P1/P2 分级表。
 SAFETY_RED_LINE: Dict[str, List[str]] = {
-    "suicide": ["不想活", "想死", "死了算了", "自杀", "结束自己", "活着没意思",
-                 "活不下去了", "解脱", "不想活了", "死了", "楼顶", "跳楼",
-                 "割腕", "安眠药", "遗书"],
-    "self_harm": ["自残", "划手", "割手", "伤害自己", "自伤", "扣自己",
-                  "掐自己", "拧自己", "撞墙", "用刀"],
-    "violence": ["打人", "踹", "动手", "家暴", "暴力", "打他", "打她",
-                 "揍", "狠狠", "往死里打"],
+    k: list(dict.fromkeys(RISK_ANCHOR_P0.get(k, []) + RISK_ANCHOR_P1.get(k, [])))
+    for k in set(RISK_ANCHOR_P0) | set(RISK_ANCHOR_P1)
 }
+
+# P0 硬闸门 / P1 探针的规则兜底探针方向（LLM 生成探针失败时的三选一框架）
+_P0_PROBE_DIRECTION = (
+    "safety_check: 使用三选一框架直接问："
+    "'是真的是不想活，还是吓唬他们，还是都有？'"
+)
+_P1_PROBE_DIRECTION = (
+    "safety_check: 用户有潜在风险信号，用自然的方式温和确认："
+    "'是真心不想活，还是心里难受，还是都有？'"
+)
 
 # ── Phase 判定阈值 ─────────────────────────────────────────────
 PHASE_TURN_THRESHOLDS = {
@@ -92,14 +103,11 @@ class FamilySystemAssessor:
         """
         result = AssessResult()
 
-        # 1. 安全红线 — 最高优先级
-        escalation = self._check_safety(user_text, emotion)
-        if escalation:
+        # 1. 安全锚点 — 最高优先级（P0 硬闸门；P1 转探针，不再直接升级）
+        safety_tier = self._check_safety(user_text, emotion)
+        if safety_tier == "p0":
             result.escalation_flag = True
-            result.probe_direction = (
-                "safety_check: 使用三选一框架直接问："
-                "'是真的是不想活，还是吓唬他们，还是都有？'"
-            )
+            result.probe_direction = _P0_PROBE_DIRECTION
             return result
 
         # 2. 家庭成员识别
@@ -125,23 +133,31 @@ class FamilySystemAssessor:
             existing_members
         )
 
+        # 6. P1 安全探针覆盖家庭探针（本轮以安全确认为优先）
+        if safety_tier == "p1":
+            result.probe_direction = _P1_PROBE_DIRECTION
+
         return result
 
-    # ── Internal: 安全红线 ─────────────────────────────────────
+    # ── Internal: 安全锚点 ─────────────────────────────────────
 
     def _check_safety(
         self, user_text: str, emotion: Dict[str, Any]
-    ) -> bool:
-        """检查是否触发安全红线。"""
-        risk = float(emotion.get("risk", 0))
-        if risk >= 0.7:
-            return True
+    ) -> Optional[str]:
+        """检查安全信号，返回锚点级别：p0（硬闸门）/ p1（探针）/ None。
 
-        for category, keywords in SAFETY_RED_LINE.items():
-            for kw in keywords:
-                if kw in user_text:
-                    return True
-        return False
+        危机判定改造（ADR-0013）：emotion.risk 高值不再在此直接升级——
+        语义安全评估器已在图上读取情绪风险 + 会话上下文做最终裁决。
+        这里只做词表级别的 P0 硬闸门与 P1 探针标记。
+        """
+        from modules.assessment.risk_anchors import match_anchor
+
+        anchors = match_anchor(user_text)
+        if anchors["p0"]:
+            return "p0"
+        if anchors["p1"]:
+            return "p1"
+        return None
 
     # ── Internal: 家庭成员识别 ──────────────────────────────────
 

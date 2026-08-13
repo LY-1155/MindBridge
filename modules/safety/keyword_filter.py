@@ -87,6 +87,40 @@ class SensitivityFilter:
         # 移除非中英文数字的字符
         return re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', text)
 
+    # \u5426\u5b9a\u8bed\u5883\u524d\u7f00\uff1a\u547d\u4e2d\u8bcd\u524d 5 \u5b57\u7b26\u5185\u51fa\u73b0\u4efb\u4e00\u5373\u89c6\u4e3a\u5426\u5b9a\u4fee\u9970\u3002
+    # \u523b\u610f\u4e0d\u5305\u542b\u5355\u72ec"\u4e0d"\uff08\u907f\u514d\u8bef\u4f24"\u4e0d\u53bb\u60f3\u81ea\u6740\u7684\u4e8b"\u8fd9\u7c7b\u771f\u5b9e\u610f\u5ff5\u8868\u8fbe\uff09\uff0c
+    # \u4e0e modules/assessment/risk_anchors.py \u7684 DENY_KEYWORDS \u8bed\u4e49\u5bf9\u9f50\uff08ADR-0013\uff09\u3002
+    _NEGATION_PREFIXES = (
+        "\u6ca1\u6709", "\u6ca1", "\u4e0d\u4f1a", "\u4e0d\u80fd", "\u4e0d\u662f", "\u4e0d\u60f3", "\u5e76\u975e", "\u5e76\u6ca1\u6709",
+        "\u522b", "\u65e0", "\u672a", "\u4e0d\u66fe", "\u4ece\u672a", "\u4e0d\u518d", "\u518d\u4e0d", "\u4ece\u4e0d", "\u4e0d\u8be5",
+        "\u4e0d\u5e94", "\u4e0d\u8981",
+    )
+    _NEGATION_WINDOW = 5
+
+    def _is_negated(self, text: str, keyword: str) -> bool:
+        """\u547d\u4e2d\u8bcd\u5728\u6587\u672c\u4e2d\u6240\u6709\u51fa\u73b0\u4f4d\u7f6e\u662f\u5426\u90fd\u88ab\u5426\u5b9a\u8bcd\u524d\u7f6e\u4fee\u9970\u3002
+
+        "\u5012\u4e5f\u6ca1\u6709\u4f24\u5bb3\u81ea\u5df1" \u2192 True\uff08\u964d\u7ea7\uff09
+        "\u6211\u60f3\u4f24\u5bb3\u81ea\u5df1"    \u2192 False\uff08\u4fdd\u6301\u786c\u62e6\u622a\uff09
+        "\u6ca1\u6709\u60f3\u8fc7\u8981\u4f24\u5bb3\u81ea\u5df1" \u2192 True\uff08window=5 \u8986\u76d6"\u6ca1\u6709"\uff09
+        """
+        positions: List[int] = []
+        start = 0
+        while True:
+            idx = text.find(keyword, start)
+            if idx < 0:
+                break
+            positions.append(idx)
+            start = idx + len(keyword)
+        if not positions:
+            return False
+        return all(self._negated_at(text, idx) for idx in positions)
+
+    def _negated_at(self, text: str, idx: int) -> bool:
+        start = max(0, idx - self._NEGATION_WINDOW)
+        window = text[start:idx]
+        return any(p in window for p in self._NEGATION_PREFIXES)
+
     def check(self, text: str, user_id: str = None) -> Tuple[bool, int, List[str]]:
         """
         检查文本中的敏感词
@@ -114,14 +148,27 @@ class SensitivityFilter:
         # 检查一级拦截词
         level_1_matches = self.patterns["level_1"].findall(cleaned_text)
         if level_1_matches:
-            matched_originals.update(level_1_matches)
-            # 检查是否在冷却期内
-            if self._should_trigger_emergency(user_id):
-                logger.warning(f"一级拦截触发！用户: {user_id}, 命中词: {level_1_matches}, 原文: {text[:50]}...")
-                return True, 1, list(set(level_1_matches)) + matched_keywords
-            else:
-                logger.info(f"一级拦截但处于冷却期，用户: {user_id}")
-                return False, 1, list(set(level_1_matches)) + matched_keywords
+            unique = list(set(level_1_matches))
+            # 否定语境：命中的一级词若全部被否定词前置修饰（"倒也没有伤害自己"），
+            # 降级为二级警告（记录但不拦截），交给 LLM 语义评估器二次裁决（ADR-0013）。
+            # 避免"没有/不会伤害自己"这类否认表达被误判为真实危机。
+            negated = [kw for kw in unique if self._is_negated(cleaned_text, kw)]
+            non_negated = [kw for kw in unique if kw not in negated]
+
+            if non_negated:
+                matched_originals.update(non_negated)
+                # 检查是否在冷却期内
+                if self._should_trigger_emergency(user_id):
+                    logger.warning(f"一级拦截触发！用户: {user_id}, 命中词: {non_negated}, 原文: {text[:50]}...")
+                    return True, 1, list(non_negated) + matched_keywords
+                else:
+                    logger.info(f"一级拦截但处于冷却期，用户: {user_id}")
+                    return False, 1, list(non_negated) + matched_keywords
+
+            if negated:
+                matched_originals.update(negated)
+                logger.info(f"一级词命中但处于否定语境，降级为二级警告: {negated}")
+                return False, 2, list(negated) + matched_keywords
 
         # 检查二级警告词
         level_2_matches = self.patterns["level_2"].findall(cleaned_text)
@@ -181,15 +228,29 @@ def run_tests():
     test_cases = [
         # (输入文本, 期望拦截, 期望等级, 描述)
         ("我觉得最近压力很大", False, 0, "正常文本"),
-        ("我真的不想活了，想去死", True, 1, "一级敏感词"),
+        ("我真的不想活了，想去死", False, 2, "纯意念词→软警告"),
         ("感觉人生没意义，好痛苦", False, 2, "二级敏感词"),
-        ("自*杀是不对的", True, 1, "谐音变体(带符号)"),
+        ("自*杀是不对的", False, 2, "谐音变体(带符号)→意念软警告"),
         ("紫砂是一种陶瓷工艺", False, 2, "谐音变体(紫砂)"),
         ("s杀是不好的", False, 2, "字母谐音"),
-        ("I want to kill myself", True, 1, "英文敏感词"),
+        ("I want to kill myself", False, 2, "英文意念词→软警告"),
         ("最近心情很压抑", False, 2, "心理关键词"),
         ("你好，今天天气不错", False, 0, "完全正常文本"),
         ("跳lou这种行为很危险", False, 2, "拼音变体"),
+        # 计划/即刻/主动意图 → 硬拦（收窄后的 level_1）
+        ("我现在就去死", True, 1, "即刻行动短语硬拦"),
+        ("我现在就要去死", True, 1, "即刻行动短语硬拦"),
+        ("我已经决定结束自己", True, 1, "已决意计划硬拦"),
+        ("我要自杀", True, 1, "主动第一人称意图硬拦"),
+        ("我想自杀", True, 1, "主动第一人称意图硬拦"),
+        ("遗书写好了", True, 1, "准备/计划硬拦"),
+        # 否定语境降级（ADR-0013 风险词命中≠危机触发）
+        ("我没有伤害自己，只是很难受", False, 2, "否定语境降级(没有伤害自己)"),
+        ("倒也没有伤害自己", False, 2, "否定语境降级(倒也没有)"),
+        ("我不会想自杀的", False, 2, "否定语境降级(不会)"),
+        ("我还没有决定结束自己", False, 2, "否定语境降级(还没有决定)"),
+        ("我不会现在就去死", False, 2, "否定语境降级(不会)"),
+        ("我想伤害自己", True, 1, "肯定语境保持硬拦"),
     ]
 
     passed = 0
