@@ -300,6 +300,21 @@ async def multimodal_chat(request: MultimodalChatRequest, user_id: str = Depends
         output = run_pipeline(inp)
         reply = output.intervention.get("reply", "")
 
+        # 持久化情绪记录到 emotion_records 表（对齐 text 路径 chat.py）
+        if output.emotion:
+            try:
+                from core.memory.db_storage import DatabaseStorage
+                DatabaseStorage.add_emotion_record(
+                    session_id=session_id,
+                    primary_emotion=output.emotion.get("primary_emotion", "neutral"),
+                    intensity=float(output.emotion.get("intensity", 0)),
+                    risk=float(output.emotion.get("risk", 0)),
+                    triggers=[],
+                    user_id=user_id,
+                )
+            except Exception:
+                pass  # 非关键路径，不阻塞 response
+
         audio_base64 = None
         if request.enable_tts:
             try:

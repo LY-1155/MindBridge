@@ -1,4 +1,7 @@
-"""混合检索器：稠密向量 + BM25 → RRF 融合 → 外部 API fallback → top-k 文本片段"""
+"""混合检索器：稠密向量 + BM25 → RRF 融合 → top-k 文本片段
+
+外部 API fallback（Tavily 药物补充）已收敛到 KnowledgeRetriever.retrieve()。
+"""
 
 from __future__ import annotations
 
@@ -7,6 +10,7 @@ from typing import List, Dict, Optional, Tuple, TYPE_CHECKING
 
 from core.rag.bm25_index import BM25Index
 from core.rag.chroma_store import ChromaStore
+from core.rag.embedder import EmbeddingError
 from core.rag.query_classifier import QueryClassifier, QueryClassification
 
 if TYPE_CHECKING:
@@ -42,22 +46,13 @@ class HybridRetriever:
     # ── 公开 API ──────────────────────────────────────────────
 
     def retrieve(self, query: str, top_k: int = 3) -> List[str]:
-        """主检索入口，返回文本片段列表"""
+        """主检索入口，返回文本片段列表。
+
+        注意：外部 API fallback 已收敛到 KnowledgeRetriever.retrieve()（生产入口），
+        此处不再处理——否则 KnowledgeRetriever 的非 rerank 分支会重复触发外部搜索。
+        """
         combined = self.retrieve_with_ids(query, top_k=top_k)
-        results = [item["text"] for item in combined]
-
-        # 外部 API fallback（知识库未覆盖内容 → Tavily 实时搜索）
-        if self._external is not None:
-            try:
-                supplements = self._external.search(query, results)
-                if supplements:
-                    results = results + supplements
-                    logger.info("外部 API fallback 命中: query=%.50s..., 补充 %d 条",
-                                query, len(supplements))
-            except Exception:
-                logger.warning("外部 API fallback 执行失败", exc_info=True)
-
-        return results
+        return [item["text"] for item in combined]
 
     def retrieve_with_ids(self, query: str, top_k: int = 3) -> List[dict]:
         """检索入口，返回带 doc ID 的结构化结果。用于评估。
@@ -139,6 +134,28 @@ class HybridRetriever:
 
         return results
 
+    def retrieve_rrf_with_ids(self, query: str, top_k: int = 15) -> List[dict]:
+        """双路 RRF 融合检索：Chroma + BM25 → RRF 融合（只看排名，不看分数）。
+
+        与 retrieve_union_with_ids 并列的另一种融合：两路各取 top_k 条，
+        RRF 融合（1/(k+rank)，稠密路乘 dense_weight）后交由 Reranker 精排。
+        RRF 只看排名不看分数，对两路分数分布差异（稠密余弦 vs BM25 计分）
+        鲁棒。40 条生产形状 A/B（scripts/eval_retrieve_fusion_ab_results.md）
+        显示 RRF 与 Union 归一化融合无显著差异（Δ+0.0312 在噪声内，
+        top-3 文本重合 0.82），生产采用 RRF。
+
+        Returns:
+            [{"id": "...", "text": "...", "score": rrf_score}, ...]
+        """
+        if not query.strip():
+            return []
+
+        dense_docs = self._search_chroma(query, top_k=top_k, chroma_filter={})
+        bm25_docs = self._search_bm25(query, top_k=top_k, bm25_filter={})
+
+        # RRF 融合
+        return self._rrf_fuse(dense_docs, bm25_docs, top_k=top_k)
+
     # ── 内部分类与过滤 ──────────────────────────────────────
 
     def _build_filter(self, classification: QueryClassification) -> dict:
@@ -180,12 +197,24 @@ class HybridRetriever:
         else:
             chroma_where = {"$and": conditions}
 
-        results = self._chroma.search(
-            query=query,
-            top_k=top_k,
-            filter_meta=chroma_where,
-            source_weights=self._source_weights,
-        )
+        if self._chroma is None:
+            # Chroma 初始化失败（索引不可用）——显式降级，不依赖上层 catch 异常
+            logger.debug("Chroma 索引不可用，跳过稠密检索")
+            return []
+
+        try:
+            results = self._chroma.search(
+                query=query,
+                top_k=top_k,
+                filter_meta=chroma_where,
+                source_weights=self._source_weights,
+            )
+        except EmbeddingError as exc:
+            # Embedding 故障（API 挂了 / 本地推理失败）：不再静默返回零向量垃圾结果，
+            # 稠密路降级为空，RRF 融合自然退化为 BM25-only。其他异常（真实 Chroma bug）
+            # 继续上抛，由外层兜底（KnowledgeRetriever.retrieve 的 try/except）处理。
+            logger.warning("稠密检索 Embedding 失败，降级为 BM25-only: %s", exc)
+            return []
         return results
 
     def _search_bm25(

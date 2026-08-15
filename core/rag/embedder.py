@@ -30,6 +30,15 @@ def _resolve_model_path(name: str) -> str:
     return name
 
 
+class EmbeddingError(RuntimeError):
+    """Embedding 生成失败。
+
+    稠密检索路径必须向上抛这个异常（而非返回零向量），否则上游会
+    拿全零向量做余弦相似度、产出随机相似度的垃圾结果。调用方应捕获
+    并降级为 BM25-only（见 HybridRetriever._search_chroma）。
+    """
+
+
 class QianwenEmbedding(EmbeddingFunction):
     """OpenAI 兼容 Embedding API 封装，实现 Chroma EmbeddingFunction 协议
 
@@ -69,13 +78,16 @@ class QianwenEmbedding(EmbeddingFunction):
                     dimensions=self._dimensions,
                 )
                 batch_vecs = [d.embedding for d in resp.data]
-            except Exception:
-                logger.error("百炼 Embedding API 调用失败，回退到零向量", exc_info=True)
-                dim = self._dim or 1024  # text-embedding-v3 / bge-m3 默认 1024 维
-                batch_vecs = [[0.0] * dim for _ in batch]
+            except Exception as exc:
+                logger.error("百炼 Embedding API 调用失败: %s", exc, exc_info=True)
+                raise EmbeddingError(
+                    f"Embedding API 调用失败（batch 大小 {len(batch)}）：{exc}"
+                ) from exc
 
             if not batch_vecs:
-                continue
+                raise EmbeddingError(
+                    f"Embedding API 返回空结果（batch 大小 {len(batch)}）"
+                )
 
             if self._dim is None and batch_vecs[0]:
                 self._dim = len(batch_vecs[0])
@@ -148,9 +160,16 @@ class BGEM3Embedding(EmbeddingFunction):
                     max_length=8192,
                 )
                 batch_vecs = output["dense_vecs"].tolist()
-            except Exception:
-                logger.error("BGE-M3 Embedding 推理失败，回退到零向量", exc_info=True)
-                batch_vecs = [[0.0] * self._dim for _ in batch]
+            except Exception as exc:
+                logger.error("BGE-M3 Embedding 推理失败: %s", exc, exc_info=True)
+                raise EmbeddingError(
+                    f"BGE-M3 Embedding 推理失败（batch 大小 {len(batch)}）：{exc}"
+                ) from exc
+
+            if not batch_vecs:
+                raise EmbeddingError(
+                    f"BGE-M3 Embedding 返回空结果（batch 大小 {len(batch)}）"
+                )
 
             all_vectors.extend(batch_vecs)
 

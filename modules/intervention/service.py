@@ -54,10 +54,10 @@ class InterventionService:
                 rewriter_llm = get_llm_adapter("openai_compatible", config=rewriter_config)
                 retriever._rewriter = QueryRewriter(rewriter_llm.llm)  # noqa: SLF001
 
-            # 启用百炼 qwen3-rerank API 重排序（零本地资源，按量付费）
+            # 启用本地 BGE cross-encoder 重排序（零 API 费用；qwen3-rerank API 免费额度已耗尽）
             if getattr(retriever, '_reranker', None) is None:  # noqa: SLF001
-                from core.rag.reranker import QwenReranker
-                retriever._reranker = QwenReranker(top_n=20, top_k=3)  # noqa: SLF001
+                from core.rag.reranker import BGEReranker
+                retriever._reranker = BGEReranker(top_n=20, top_k=3)  # noqa: SLF001
 
             self._generator = InterventionReplyGenerator(llm=llm, retriever=retriever)
         return self._generator
@@ -78,6 +78,29 @@ class InterventionService:
             return None
         from core.memory.session_memory import SessionManager
         return SessionManager.get_session(session_id)
+
+    def _save_crisis_turn(self, session_id: Optional[str], user_text: str, ai_reply: str) -> None:
+        """危机路径消息落库：用户高风险原话 + AI 危机话术（安全审计）。
+
+        修复前危机路由只发模板不落库——用户的高风险表述和 AI 危机回复
+        （热线话术、rescue 触发）在 messages 表里没有留痕，仅靠
+        safety_flags.matched_terms 间接记录。此方法不用 _get_generator()
+        （会初始化 LLM/检索器，危机路径要求零延迟），直接走轻量 SessionManager。
+        """
+        if not session_id:
+            return
+        try:
+            session = self._get_session(session_id)
+            if session is None:
+                return
+            session.add_user_message(user_text)
+            session.add_ai_message(ai_reply)
+            logger.info(
+                "[TURN_SAVE] crisis session=%s user_msg_len=%d ai_msg_len=%d",
+                session_id, len(user_text), len(ai_reply),
+            )
+        except Exception as e:
+            logger.warning("[TURN_SAVE] crisis FAILED session=%s: %s", session_id, e)
 
     def _get_assessor(self):
         """延迟初始化 FamilySystemAssessor。"""
@@ -387,7 +410,9 @@ class InterventionService:
         logger.info("[PIPELINE:TRACE] INTERVENTION dispatch → %s", route)
 
         if route == "crisis":
-            return self._get_crisis().handle(req)
+            result = self._get_crisis().handle(req)
+            self._save_crisis_turn(req.session_id, req.user_text, result.reply)
+            return result
 
         if route == "general":
             return self._get_generator().generate_general(
@@ -552,6 +577,7 @@ class InterventionService:
 
         if route == "crisis":
             result = self._get_crisis().handle(req)
+            self._save_crisis_turn(req.session_id, req.user_text, result.reply)
             yield result.reply  # 模板话术，单 chunk
             return
 

@@ -190,7 +190,7 @@ class KnowledgeRetriever:
     def retrieve(self, query: str, top_k: int = 3) -> List[str]:
         """主检索入口：返回文本片段列表（兼容原接口）
 
-        流程：Query Rewriting → Union(Chroma + BM25) → Reranker 精排 → top-k
+        流程：Query Rewriting → RRF 融合(Chroma + BM25) → Reranker 精排 → top-k
         """
         final_k = top_k or self._retrieval_config.get("top_k", 3)
 
@@ -205,13 +205,16 @@ class KnowledgeRetriever:
             self._ensure_hybrid()
 
             if self._reranker is not None:
-                # ── 有 Reranker：Union 模式 ──
-                # 两路各取 top_n 条，去重合并后交给 Reranker 精排
+                # ── 有 Reranker：RRF 融合模式 ──
+                # 两路各取 top_n 条，RRF 融合（只看排名，不看分数）后交给 Reranker 精排。
+                # 40 条生产形状 A/B（scripts/eval_retrieve_fusion_ab_results.md）显示
+                # RRF 与 Union 归一化融合无显著差异（Δ+0.0312 在噪声内，top-3 重合 0.82），
+                # RRF 对分数分布差异鲁棒且是社区标准做法，故采用 RRF。
                 fetch_k = self._reranker._top_n  # noqa: SLF001
-                union_docs = self._hybrid.retrieve_union_with_ids(
+                fused_docs = self._hybrid.retrieve_rrf_with_ids(
                     search_query, top_k=fetch_k
                 )
-                candidates = [d["text"] for d in union_docs]
+                candidates = [d["text"] for d in fused_docs]
             else:
                 # ── 无 Reranker：RRF 模式（兼容旧行为） ──
                 candidates = self._hybrid.retrieve(
@@ -227,6 +230,24 @@ class KnowledgeRetriever:
             candidates = self._reranker.rerank(query, candidates)
 
         candidates = candidates[:final_k]
+
+        # Step 3: 外部 API fallback（药物名感知，本地知识库未收录精神科药物时 Tavily 实时补充）
+        # 原集成点在 HybridRetriever.retrieve()，但生产走 rerank 分支（retrieve_rrf_with_ids）
+        # 根本不经它；非 rerank 分支里 supplement 也会被上面的 candidates[:final_k] 截断——
+        # 外部兜底在生产路径实际是死代码。统一收敛到本入口，重排/非重排分支都覆盖。
+        if self._external is not None:
+            try:
+                supplements = self._external.search(query, candidates)
+                if supplements:
+                    # 补充文本替换被本地检索判为最弱的条目（排末尾），
+                    # 避免简单追加到末尾后又被截断丢失。
+                    candidates = (candidates + supplements)[:final_k]
+                    logger.info(
+                        "外部 API fallback 命中: query=%.50s..., 补充 %d 条",
+                        query, len(supplements),
+                    )
+            except Exception:
+                logger.warning("外部 API fallback 执行失败", exc_info=True)
 
         if candidates:
             logger.info("知识库检索命中: query=%.50s..., hits=%d", query, len(candidates))

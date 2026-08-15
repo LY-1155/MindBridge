@@ -1,6 +1,6 @@
 """搜索 fallback 模块：当知识库不覆盖某个精神科药物时，通过 Tavily 实时检索补充。
 
-集成点：ExternalRetriever → HybridRetriever.retrieve() → KnowledgeRetriever.retrieve()
+集成点：ExternalRetriever → KnowledgeRetriever.retrieve()（生产入口，收敛后调用）
 三层架构中最外层的外部 API 兜底层。
 """
 

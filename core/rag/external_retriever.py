@@ -3,7 +3,7 @@
 当前策略：精神科药物名感知触发 → Tavily Search API 实时检索。
 后续扩展：分数阈值通用 fallback（ADR 0008）。
 
-集成点：HybridRetriever.retrieve() — RRF 融合后调用。
+集成点：KnowledgeRetriever.retrieve() — 检索收敛、截断到 top-k 后调用。
 """
 
 from __future__ import annotations
