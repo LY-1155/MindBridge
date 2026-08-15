@@ -5,7 +5,7 @@ Redis 会话热缓存层
 Gap #19：Redis 做会话热数据（目录、元数据、最近消息），MySQL 做持久化。
 
 Key 设计：
-  psy:session:{id}        HASH   — 会话元数据 (user_id, message_count, ...)
+  psy:session:{id}        HASH   — 会话元数据 (state: 整份 SessionMetadata JSON)
   psy:session:{id}:msgs   LIST   — 最近 N 条消息 (JSON, LPUSH / LRANGE)
   psy:user:{uid}:sessions SET    — 用户拥有的会话 ID 列表
 
@@ -51,18 +51,17 @@ def _user_key(user_id: str) -> str:
 # ── 会话元数据 ────────────────────────────────────────────────────
 
 def save_session_meta(session_id: str, meta: Dict[str, Any]) -> None:
-    """将会话元数据写入 Redis HASH 并设置 TTL。"""
+    """将会话元数据写入 Redis HASH 的 state 字段并设置 TTL。
+
+    meta 为整份 SessionMetadata 状态 dict（来自 SessionMetadata.to_state()）。
+    单一 "state" 字段存整份蒸馏状态，与 MySQL state_json 共用同一序列化器，
+    避免字段清单漂移（历史上曾因四份手写清单不一致导致蒸馏状态从不落库）。
+    """
     try:
         r = _get_redis()
         key = _session_key(session_id)
         r.hset(key, mapping={
-            "user_id": meta.get("user_id", ""),
-            "message_count": str(meta.get("message_count", 0)),
-            "key_topics": json.dumps(meta.get("key_topics", []), ensure_ascii=False),
-            "scale_state": json.dumps(meta.get("scale_state"), ensure_ascii=False),
-            "scale_history": json.dumps(meta.get("scale_history", []), ensure_ascii=False),
-            "last_active": meta.get("last_active", ""),
-            "created_at": meta.get("created_at", ""),
+            "state": json.dumps(meta, ensure_ascii=False),
         })
         r.expire(key, DEFAULT_TTL)
     except redis.RedisError as e:
@@ -70,21 +69,20 @@ def save_session_meta(session_id: str, meta: Dict[str, Any]) -> None:
 
 
 def load_session_meta(session_id: str) -> Optional[Dict[str, Any]]:
-    """从 Redis HASH 加载会话元数据。不存在则返回 None。"""
+    """从 Redis HASH 的 state 字段加载整份会话状态。
+
+    不存在或旧格式（无 state 字段）时返回 None，调用方回退 MySQL。
+    """
     try:
         r = _get_redis()
         key = _session_key(session_id)
-        data = r.hgetall(key)
-        if not data:
+        raw = r.hget(key, "state")
+        if not raw:
             return None
-        return {
-            "session_id": session_id,
-            "user_id": data.get("user_id", ""),
-            "message_count": int(data.get("message_count", 0)),
-            "key_topics": json.loads(data.get("key_topics", "[]")),
-            "scale_state": json.loads(data.get("scale_state", "null")),
-            "scale_history": json.loads(data.get("scale_history", "[]")),
-        }
+        state = json.loads(raw)
+        if not isinstance(state, dict):
+            return None
+        return state
     except redis.RedisError as e:
         logger.warning("Redis load_session_meta 失败: %s", e)
         return None

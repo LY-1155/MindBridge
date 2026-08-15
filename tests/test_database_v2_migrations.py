@@ -71,8 +71,8 @@ class TestNewTablesExist:
             pass  # base 已经是干净的
         command.upgrade(alembic_cfg, "head")
         yield
-        # teardown: 回退，保持干净
-        command.downgrade(alembic_cfg, "base")
+        # teardown: 保持 head（下一模块 setup 会先降级再升级，模块级依然干净）
+        command.upgrade(alembic_cfg, "head")
 
     def _get_tables(self):
         from schemas.database import db_manager
@@ -128,6 +128,22 @@ class TestNewTablesExist:
                 WHERE TABLE_SCHEMA=:db AND TABLE_NAME='messages' AND COLUMN_NAME='content'
             """), {"db": settings.MYSQL_DATABASE}).scalar()
             assert dtype == "text"
+
+    def test_sessions_has_state_json_column(self, alembic_cfg):
+        """sessions.state_json 列应存在（会话蒸馏状态 JSON，AES 加密存储）。
+
+        修复 P0：蒸馏临床状态（phase/假设/家庭/SCID/危机状态机）此前从不落库，
+        此列为整份 SessionMetadata 的权威持久化载体。
+        """
+        from schemas.database import db_manager
+        with db_manager.get_session_direct() as session:
+            cols = session.execute(text("""
+                SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA=:db AND TABLE_NAME='sessions'
+            """), {"db": settings.MYSQL_DATABASE}).fetchall()
+            col_map = {r[0]: r[1] for r in cols}
+            assert "state_json" in col_map, f"缺少 state_json 列，现有列: {list(col_map.keys())}"
+            assert col_map["state_json"] == "text"
 
     # ---- Slice 4: emotion_records, safety_flags, scale_screenings ----
 

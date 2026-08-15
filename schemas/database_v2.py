@@ -185,6 +185,9 @@ class SessionV2(Base):
     key_topics = Column(Text, nullable=True, comment="关键话题 JSON")
     scale_state = Column(Text, nullable=True, comment="量表进行中状态 JSON")
     scale_history = Column(Text, nullable=True, comment="量表历史 JSON")
+    state_json = Column(
+        Text, nullable=True,
+        comment="会话蒸馏状态 JSON（AES 加密存储；phase/假设/家庭/SCID/危机等整份 SessionMetadata）")
     created_at = Column(DateTime, default=_beijing_now, comment="创建时间")
     last_active = Column(DateTime, default=_beijing_now, onupdate=_beijing_now, comment="最后活跃")
 

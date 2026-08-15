@@ -61,26 +61,36 @@ class DatabaseStorage:
     def save_session(cls, session_id: str, metadata: Dict[str, Any]) -> bool:
         """
         保存或更新会话信息
-        
+
         如果会话已存在则更新，不存在则创建。
-        
+
+        metadata 为整份 SessionMetadata 状态（来自 SessionMetadata.to_state()）。
+        state_json 列（AES 加密）是蒸馏状态的唯一权威来源；其余列
+        （key_topics/scale_state/scale_history/message_count 等）为兼容列，
+        保留写入以兼容旧读者（CLI、integration 脚本、chat 路由）。
+
         Args:
             session_id: 会话ID
-            metadata: 会话元数据字典
-            
+            metadata: 整份会话状态字典
+
         Returns:
             bool: 保存是否成功
         """
+        state_json = (
+            encrypt_field(json.dumps(metadata, ensure_ascii=False))
+            if metadata else None
+        )
         with cls._get_db() as db:
             # 查找现有会话
             existing = db.query(SessionV2).filter(
                 SessionV2.session_id == session_id
             ).first()
-            
+
             if existing:
                 # 更新现有会话
                 existing.message_count = metadata.get("message_count", existing.message_count)
                 existing.last_active = datetime.now()
+                existing.state_json = state_json
                 if metadata.get("key_topics"):
                     existing.key_topics = json.dumps(metadata["key_topics"], ensure_ascii=False)
                 if metadata.get("scale_state"):
@@ -98,21 +108,26 @@ class DatabaseStorage:
                     key_topics=json.dumps(metadata.get("key_topics", []), ensure_ascii=False),
                     scale_state=json.dumps(metadata.get("scale_state"), ensure_ascii=False) if metadata.get("scale_state") else None,
                     scale_history=json.dumps(metadata.get("scale_history", []), ensure_ascii=False),
+                    state_json=state_json,
                     created_at=datetime.now(),
                     last_active=datetime.now()
                 )
                 db.add(new_session)
-            
+
             return True
     
     @classmethod
     def load_session(cls, session_id: str) -> Optional[Dict[str, Any]]:
         """
         加载会话信息
-        
+
+        state_json（加密）存在时返回整份蒸馏状态（权威来源）；
+        否则回退到兼容列拼出的部分 dict（旧行，缺失字段由 SessionMetadata
+        默认值补齐）。
+
         Args:
             session_id: 会话ID
-            
+
         Returns:
             Dict: 会话数据字典，如果不存在返回None
         """
@@ -120,10 +135,16 @@ class DatabaseStorage:
             session = db.query(SessionV2).filter(
                 SessionV2.session_id == session_id
             ).first()
-            
+
             if not session:
                 return None
-            
+
+            if session.state_json:
+                state = json.loads(safe_decrypt_field(session.state_json))
+                if isinstance(state, dict):
+                    return state
+
+            # 兼容列回退（state_json 缺失的存量行）
             return {
                 "session_id": session.session_id,
                 "user_id": session.user_id,

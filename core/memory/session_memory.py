@@ -59,6 +59,25 @@ class SessionMetadata(BaseModel):
     safety_state: Optional[Dict[str, Any]] = None
     #   危机状态机（ADR-0013）：{"status": "NONE"|"PROBING"|"CRISIS", "probe_count": N, "denial_mark": bool}
 
+    # ── 统一序列化（整份状态的唯一权威来源）──────────────────
+    # 历史教训：曾有四份手写字段清单（session_memory 写、db_storage 写/读、
+    # redis_storage 写/读）字段集合不一致，导致蒸馏临床状态
+    # （phase/假设/家庭/SCID/危机状态机）从不落库。现在存储层只认
+    # to_state()/from_state() 这一个序列化器，杜绝字段清单漂移。
+
+    def to_state(self) -> Dict[str, Any]:
+        """整份状态 → JSON 安全 dict（datetime 自动 isoformat，可直接 json.dumps）。"""
+        return self.model_dump(mode="json")
+
+    @classmethod
+    def from_state(cls, data: Dict[str, Any]) -> "SessionMetadata":
+        """JSON 安全 dict → SessionMetadata。
+
+        model_validate 对缺失 key 自动填字段默认值（旧行/不完整 dict 也能安全重建），
+        ConfigDict(extra="ignore") 保证新字段向前兼容。
+        """
+        return cls.model_validate(data)
+
 
 class EmotionRecord(BaseModel):
     """情绪记录"""
@@ -132,20 +151,8 @@ class TherapySessionMemory:
             )
             meta = load_session_meta(self.session_id)
             if meta:
-                self.metadata = SessionMetadata(
-                    session_id=self.session_id,
-                    user_id=meta.get("user_id"),
-                    message_count=meta.get("message_count", 0),
-                    key_topics=meta.get("key_topics", []),
-                    probed_dimensions=meta.get("probed_dimensions", []),
-                    scale_state=meta.get("scale_state"),
-                    scale_history=meta.get("scale_history", []),
-                    phase=meta.get("phase", "check_in"),
-                    family_members=meta.get("family_members", []),
-                    working_hypothesis=meta.get("working_hypothesis"),
-                    scid_flags=meta.get("scid_flags", {}),
-                    scid_interview_state=meta.get("scid_interview_state"),
-                    safety_state=meta.get("safety_state"),
+                self.metadata = SessionMetadata.from_state(
+                    {**meta, "session_id": self.session_id}
                 )
                 logger.debug("[SCALE:LOAD] Redis HIT session=%s scale_state=%s",
                              self.session_id,
@@ -174,22 +181,8 @@ class TherapySessionMemory:
 
             session_data = DatabaseStorage.load_session(self.session_id)
             if session_data:
-                self.metadata = SessionMetadata(
-                    session_id=session_data["session_id"],
-                    user_id=session_data.get("user_id"),
-                    created_at=session_data["created_at"],
-                    last_active=session_data["last_active"],
-                    message_count=session_data["message_count"],
-                    key_topics=session_data.get("key_topics", []),
-                    probed_dimensions=session_data.get("probed_dimensions", []),
-                    scale_state=session_data.get("scale_state"),
-                    scale_history=session_data.get("scale_history", []),
-                    phase=session_data.get("phase", "check_in"),
-                    family_members=session_data.get("family_members", []),
-                    working_hypothesis=session_data.get("working_hypothesis"),
-                    scid_flags=session_data.get("scid_flags", {}),
-                    scid_interview_state=session_data.get("scid_interview_state"),
-                    safety_state=session_data.get("safety_state"),
+                self.metadata = SessionMetadata.from_state(
+                    {**session_data, "session_id": self.session_id}
                 )
                 # 回填 Redis 缓存
                 self._sync_meta_to_redis()
@@ -227,29 +220,11 @@ class TherapySessionMemory:
     # ── 持久化辅助 ──────────────────────────────────────────────
 
     def _sync_meta_to_redis(self) -> None:
-        """将当前 metadata 写回 Redis。"""
+        """将当前整份 metadata 状态写回 Redis（state 字段）。"""
         try:
             from core.memory.redis_storage import save_session_meta
 
-            save_session_meta(
-                self.session_id,
-                {
-                    "user_id": self.metadata.user_id,
-                    "message_count": self.metadata.message_count,
-                    "key_topics": self.metadata.key_topics,
-                    "probed_dimensions": self.metadata.probed_dimensions,
-                    "scale_state": self.metadata.scale_state,
-                    "scale_history": self.metadata.scale_history,
-                    "phase": self.metadata.phase,
-                    "family_members": self.metadata.family_members,
-                    "working_hypothesis": self.metadata.working_hypothesis,
-                    "scid_flags": self.metadata.scid_flags,
-                    "scid_interview_state": self.metadata.scid_interview_state,
-                    "safety_state": self.metadata.safety_state,
-                    "last_active": self.metadata.last_active.isoformat(),
-                    "created_at": self.metadata.created_at.isoformat(),
-                },
-            )
+            save_session_meta(self.session_id, self.metadata.to_state())
         except Exception:
             pass
 
@@ -269,29 +244,13 @@ class TherapySessionMemory:
             pass
 
     def _save_to_database(self) -> None:
-        """保存会话元数据到 MySQL。"""
+        """保存整份会话状态到 MySQL（state_json）+ 同步 Redis。"""
         if not self.use_database:
             return
         try:
             from core.memory.db_storage import DatabaseStorage
 
-            DatabaseStorage.save_session(
-                self.session_id,
-                {
-                    "user_id": self.metadata.user_id,
-                    "message_count": self.metadata.message_count,
-                    "key_topics": self.metadata.key_topics,
-                    "probed_dimensions": self.metadata.probed_dimensions,
-                    "scale_state": self.metadata.scale_state,
-                    "scale_history": self.metadata.scale_history,
-                    "phase": self.metadata.phase,
-                    "family_members": self.metadata.family_members,
-                    "working_hypothesis": self.metadata.working_hypothesis,
-                    "scid_flags": self.metadata.scid_flags,
-                    "scid_interview_state": self.metadata.scid_interview_state,
-                    "safety_state": self.metadata.safety_state,
-                },
-            )
+            DatabaseStorage.save_session(self.session_id, self.metadata.to_state())
             # 同步 Redis
             self._sync_meta_to_redis()
         except Exception as e:
@@ -315,25 +274,7 @@ class TherapySessionMemory:
         try:
             from core.memory.redis_storage import save_session_meta
 
-            save_session_meta(
-                self.session_id,
-                {
-                    "user_id": self.metadata.user_id,
-                    "message_count": self.metadata.message_count,
-                    "key_topics": self.metadata.key_topics,
-                    "probed_dimensions": self.metadata.probed_dimensions,
-                    "scale_state": self.metadata.scale_state,
-                    "scale_history": self.metadata.scale_history,
-                    "phase": self.metadata.phase,
-                    "family_members": self.metadata.family_members,
-                    "working_hypothesis": self.metadata.working_hypothesis,
-                    "scid_flags": self.metadata.scid_flags,
-                    "scid_interview_state": self.metadata.scid_interview_state,
-                    "safety_state": self.metadata.safety_state,
-                    "last_active": self.metadata.last_active.isoformat(),
-                    "created_at": self.metadata.created_at.isoformat(),
-                },
-            )
+            save_session_meta(self.session_id, self.metadata.to_state())
             logger.debug("[SCALE:SAVE] Redis OK session=%s scale=%s status=%s",
                          self.session_id,
                          (self.metadata.scale_state or {}).get("scale_name", "-"),
@@ -346,30 +287,20 @@ class TherapySessionMemory:
         try:
             from core.memory.db_storage import DatabaseStorage
 
-            DatabaseStorage.save_session(
-                self.session_id,
-                {
-                    "user_id": self.metadata.user_id,
-                    "message_count": self.metadata.message_count,
-                    "key_topics": self.metadata.key_topics,
-                    "probed_dimensions": self.metadata.probed_dimensions,
-                    "scale_state": self.metadata.scale_state,
-                    "scale_history": self.metadata.scale_history,
-                    "phase": self.metadata.phase,
-                    "family_members": self.metadata.family_members,
-                    "working_hypothesis": self.metadata.working_hypothesis,
-                    "scid_flags": self.metadata.scid_flags,
-                    "scid_interview_state": self.metadata.scid_interview_state,
-                    "safety_state": self.metadata.safety_state,
-                },
-            )
+            DatabaseStorage.save_session(self.session_id, self.metadata.to_state())
         except Exception as e:
             logger.warning("save_scale_state MySQL 写入失败（Redis 已成功）: %s", e)
 
     # ── 消息操作 ────────────────────────────────────────────────
 
     def add_message(self, message: BaseMessage) -> None:
-        """添加消息到 Redis 缓存 + MySQL。"""
+        """添加消息到内存；持久化模式下同步 MySQL + Redis 热缓存。
+
+        use_database=false 时严格纯内存（消息不跨实例、不写 Redis），
+        与 get_messages 的读取 gate 对称。历史问题：Redis 写不 gate 在
+        use_database 上，导致测试/开发模式消息泄漏到 Redis，跨实例读到
+        别的会话（或本会话上一轮）的消息。
+        """
         role = "user" if isinstance(message, HumanMessage) else "assistant"
         content = message.content
 
@@ -382,13 +313,13 @@ class TherapySessionMemory:
             except Exception as e:
                 logger.warning("保存消息到数据库失败: %s", e)
 
-        # Redis（热缓存）
-        try:
-            from core.memory.redis_storage import cache_message
+            # Redis（热缓存）
+            try:
+                from core.memory.redis_storage import cache_message
 
-            cache_message(self.session_id, role, content)
-        except Exception:
-            pass
+                cache_message(self.session_id, role, content)
+            except Exception:
+                pass
 
         # 纯内存回退（无 Redis / 无 DB 场景）
         if not hasattr(self, "_messages"):
@@ -407,23 +338,24 @@ class TherapySessionMemory:
         self.add_message(AIMessage(content=content))
 
     def get_messages(self) -> List[BaseMessage]:
-        """获取会话消息（Redis 缓存优先 → MySQL 回退 → 内存回退）。"""
-        # 1) Redis 缓存
-        try:
-            from core.memory.redis_storage import get_cached_messages
+        """获取会话消息（持久化模式：Redis 缓存优先 → MySQL 回退；否则纯内存）。"""
+        # 1) Redis 缓存（仅持久化模式读；use_database=false 时纯内存，不读残留 key）
+        if self.use_database:
+            try:
+                from core.memory.redis_storage import get_cached_messages
 
-            cached = get_cached_messages(
-                self.session_id, self.max_history_turns * 2
-            )
-            if cached:
-                return [
-                    HumanMessage(content=m["content"])
-                    if m["role"] == "user"
-                    else AIMessage(content=m["content"])
-                    for m in cached
-                ]
-        except Exception:
-            pass
+                cached = get_cached_messages(
+                    self.session_id, self.max_history_turns * 2
+                )
+                if cached:
+                    return [
+                        HumanMessage(content=m["content"])
+                        if m["role"] == "user"
+                        else AIMessage(content=m["content"])
+                        for m in cached
+                    ]
+            except Exception:
+                pass
 
         # 2) MySQL 回退
         if self.use_database:
@@ -673,26 +605,14 @@ class SessionManager:
 
         use_db = kwargs.get("use_database", settings.USE_DATABASE)
 
+        # 统一状态：整份 SessionMetadata 默认值 → to_state()，MySQL/Redis 同一序列化器
+        state = SessionMetadata(session_id=session_id, user_id=user_id).to_state()
+
         # 写 MySQL
         if use_db:
             try:
                 from core.memory.db_storage import DatabaseStorage
-                DatabaseStorage.save_session(
-                    session_id,
-                    {
-                        "user_id": user_id,
-                        "message_count": 0,
-                        "key_topics": [],
-                        "probed_dimensions": [],
-                        "scale_history": [],
-                        "phase": "check_in",
-                        "family_members": [],
-                        "working_hypothesis": None,
-                        "scid_flags": {},
-                        "scid_interview_state": None,
-                        "safety_state": None,
-                    },
-                )
+                DatabaseStorage.save_session(session_id, state)
             except Exception as e:
                 logger.warning("create_session DB error: %s", e)
 
@@ -702,25 +622,7 @@ class SessionManager:
                 save_session_meta,
                 add_user_session,
             )
-            save_session_meta(
-                session_id,
-                {
-                    "user_id": user_id,
-                    "message_count": 0,
-                    "key_topics": [],
-                    "probed_dimensions": [],
-                    "scale_state": None,
-                    "scale_history": [],
-                    "phase": "check_in",
-                    "family_members": [],
-                    "working_hypothesis": None,
-                    "scid_flags": {},
-                    "scid_interview_state": None,
-                    "safety_state": None,
-                    "last_active": datetime.now().isoformat(),
-                    "created_at": datetime.now().isoformat(),
-                },
-            )
+            save_session_meta(session_id, state)
             if user_id:
                 add_user_session(user_id, session_id)
         except Exception:
