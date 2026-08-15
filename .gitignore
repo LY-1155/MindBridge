@@ -97,5 +97,7 @@ DSM-5*.pdf
 data/knowledge/_test_persist/
 
 # Claude 会话记忆（非项目代码）
-memory/
+# 注意：必须用 /memory/（锚定根目录）——裸 memory/ 会匹配任意层级的
+# memory 目录，误伤 core/memory/（会话记忆模块代码，需入库）。
+/memory/
 MEMORY.md
