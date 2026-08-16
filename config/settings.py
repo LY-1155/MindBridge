@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     DOCTOR_MODE: bool = False       # 总开关；true=启用周医生风格对话
     DOCTOR_PERSONA: str = "zhou"    # persona 选择（zhou / future personas）
 
+    # ── 上下文工程（包 B）：token 预算自适应截断 + 滚动摘要 ────
+    # 简历卖点：「基于 tokenizer 的自适应上下文压缩 + 滚动摘要分层（对标 MemGPT working/summary）」
+    HISTORY_TOKEN_BUDGET: int = 2000     # 注入 prompt 的对话历史 token 预算（摘要前缀 + 最近 N 轮原文）
+    SUMMARY_EVERY_N_TURNS: int = 8       # 每 N 轮把旧对话压成一段 LLM 滚动摘要
+    SUMMARY_MODEL_NAME: str = "qwen-turbo"  # 滚动摘要专用轻量模型（flash 级，enable_thinking=false）
+
     # ── 语义安全评估器（危机判定改造，ADR-0013）────────────────
     SAFETY_JUDGE_MODEL: str = "qwen-turbo"             # 评估器专用模型（flash 级，可在 .env 覆盖）
     SAFETY_JUDGE_ANCHOR_RISK_THRESHOLD: float = 0.4    # 情绪风险锚点低阈值（故意低于 crisis 阈值 0.7，宁可多调不可漏掉）

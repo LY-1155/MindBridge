@@ -59,6 +59,15 @@ class SessionMetadata(BaseModel):
     safety_state: Optional[Dict[str, Any]] = None
     #   危机状态机（ADR-0013）：{"status": "NONE"|"PROBING"|"CRISIS", "probe_count": N, "denial_mark": bool}
 
+    # ── 滚动摘要（包 B：上下文工程）────────────────────────────
+    #   较早对话的 LLM 自然语言摘要（对标 MemGPT working/summary 分层）。
+    #   达到 SUMMARY_EVERY_N_TURNS 轮时由 generator._maybe_roll_summary 滚动更新，
+    #   prompt 注入时作为「早期对话摘要」置于最近 N 轮原文之前。
+    #   危机路径绝不触碰（铁律：危机零延迟），仅普通对话路径更新。
+    rolling_summary: Optional[str] = None
+    rolling_summary_turn: int = 0
+    #   最近一次生成摘要时的对话轮数（message_count // 2），用于追踪摘要覆盖范围
+
     # ── 统一序列化（整份状态的唯一权威来源）──────────────────
     # 历史教训：曾有四份手写字段清单（session_memory 写、db_storage 写/读、
     # redis_storage 写/读）字段集合不一致，导致蒸馏临床状态
@@ -550,6 +559,19 @@ class TherapySessionMemory:
             )
         parts.append(f"对话轮数：{self.metadata.message_count // 2}")
         return "\n".join(parts)
+
+    def set_rolling_summary(self, summary: str, last_turn: int) -> None:
+        """更新滚动摘要并持久化。
+
+        由 generator._maybe_roll_summary 在普通对话路径触发（每 SUMMARY_EVERY_N_TURNS 轮）。
+        crisis 路径不走这里（铁律：危机零延迟）。持久化失败只记 warning，不阻断对话。
+        """
+        self.metadata.rolling_summary = summary
+        self.metadata.rolling_summary_turn = last_turn
+        try:
+            self._save_to_database()
+        except Exception as e:
+            logger.warning("保存滚动摘要失败 session=%s: %s", self.session_id, e)
 
     def clear(self) -> None:
         """清空会话（Redis + MySQL）。"""
