@@ -46,7 +46,7 @@
 ### 知识库 RAG
 - **查询分类**：LLM 将用户查询分为 9 类心理学知识域 → Chroma metadata 过滤
 - **混合检索**：稠密向量（百炼 Embedding）+ jieba-BM25 关键词 → RRF 融合排序
-- **实时兜底**：Tavily Search API 补充 60+ 种知识库未覆盖的精神科药物信息
+- **实时兜底**：Tavily Search API 补充知识库未覆盖的精神科药物信息（覆盖 56 种常见精神科药物）
 
 ### 量表筛查
 - 支持 PHQ-9（抑郁）、GAD-7（焦虑）标准化量表
@@ -95,8 +95,7 @@
 ### 安装
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/xuteng-412/PRISM.git
+# 1. 克隆仓库后进入项目目录
 cd PRISM
 
 # 2. 创建虚拟环境
@@ -139,7 +138,7 @@ docker compose -f docker/docker-compose.yml ps
 | `POST /api/v1/modules/emotion/analyze` | 独立情绪分析 |
 | `POST /api/v1/modules/router/route` | 独立路由决策 |
 | `POST /api/v1/modules/intervention/run` | 独立干预生成 |
-| `POST /api/v1/chat` | 文本咨询（遗留治疗链路径） |
+| `POST /api/v1/chat` | 文本咨询（合同管线） |
 | `POST /api/v1/auth/register` | 用户注册 |
 | `POST /api/v1/auth/login` | 用户登录 |
 | `GET /api/v1/user/export` | 用户数据导出 |
@@ -168,8 +167,8 @@ PRISM/
 ├── core/                       # 核心基础设施
 │   ├── llm/                    # LLM 适配器（Qwen 等）
 │   ├── memory/                 # 会话记忆（Redis + MySQL）
-│   ├── rag/                    # RAG（query_classifier / search_fallback）
-│   └── chain/                  # 治疗对话链（遗留路径）
+│   ├── rag/                    # RAG（query_classifier / search_fallback / hybrid）
+│   └── chain/                  # 已退役（therapy_chain 已移除）
 ├── config/                     # 配置
 │   ├── settings.py             # Pydantic Settings
 │   ├── router_rules.json       # 路由规则配置
