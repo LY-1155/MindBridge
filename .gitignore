@@ -95,6 +95,9 @@ modules/safety/siglip2-nsfw/
 DSM-5*.pdf
 # Chroma 测试残留
 data/knowledge/_test_persist/
+# 真实咨询语料评测集（含原始患者文件编号，敏感，不入库）
+data/eval/zhou_queries.jsonl
+data/eval/zhou_candidates.jsonl
 
 # Claude 会话记忆（非项目代码）
 # 注意：必须用 /memory/（锚定根目录）——裸 memory/ 会匹配任意层级的
